@@ -1,0 +1,85 @@
+# Simone Project Configuration
+# Generated: 2025-08-16
+
+project:
+  name: AIrsenal
+  description: AI-powered Fantasy Premier League optimization tool using machine learning
+  type: single
+  riskLevel: 6  # Balanced - confirm major changes
+
+contexts:
+  - name: main
+    stack:
+      language: python
+      framework: 
+        - sqlalchemy
+        - jax
+        - numpyro
+        - flask
+      database: sqlite
+      packageManager: uv
+    
+    tooling:
+      commands:
+        install: "uv sync"
+        installDev: "uv sync --extra dev"
+        test: "pytest"
+        testCoverage: "pytest --cov=airsenal"
+        lint: "ruff check --fix ."
+        format: "ruff format ."
+        typecheck: "mypy airsenal/framework airsenal/scripts"
+        preCommit: "pre-commit install"
+        
+        # Main AIrsenal commands
+        pipeline: "uv run airsenal_run_pipeline"
+        setupDb: "uv run airsenal_setup_initial_db"
+        updateDb: "uv run airsenal_update_db"
+        predict: "uv run airsenal_run_prediction"
+        optimize: "uv run airsenal_run_optimization"
+        makeSquad: "uv run airsenal_make_squad"
+        checkData: "uv run airsenal_check_data"
+        env: "uv run airsenal_env"
+    
+    methodology:
+      testing: pytest
+      style: pep8
+      documentation: numpydoc
+      versionControl: git
+      cicd: github-actions
+
+shared:
+  conventions:
+    - Use type hints where possible
+    - Follow PEP-8 style guide
+    - Use numpydoc format for docstrings
+    - Prefer existing libraries over new dependencies
+    - Never commit secrets or API keys
+  
+  testing:
+    framework: pytest
+    coverage: true
+    minCoverage: null
+  
+  documentation:
+    format: markdown
+    location: README.md
+
+github:
+  repository: whrit/AIrsenal
+  tool: cli
+  defaultBranch: main
+  workflow:
+    branches:
+      main: stable
+      develop: latest features
+      feature: "feature/<issue>-description"
+      bugfix: "bugfix/<issue>-description"
+
+features:
+  pr_review_wait:
+    enabled: false
+
+monitoring:
+  errors: true
+  performance: false
+  logging: console

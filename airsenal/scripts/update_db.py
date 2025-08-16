@@ -9,6 +9,10 @@ import argparse
 from sqlalchemy.orm.session import Session
 
 from airsenal.framework.schema import Player, database_is_empty, session_scope
+from airsenal.framework.database_versioning import (
+    validate_database_on_startup,
+    DatabaseVersionError
+)
 from airsenal.framework.transaction_utils import count_transactions, update_squad
 from airsenal.framework.utils import (
     CURRENT_SEASON,
@@ -213,6 +217,21 @@ def main():
         if database_is_empty(session):
             print("Database is empty, run 'airsenal_setup_initial_db' first")
             return
+
+        # Validate database version compatibility before updating
+        try:
+            version_compatible = validate_database_on_startup(
+                dbsession=session,
+                force_migration=False,
+                error_on_mismatch=False  # Just warn, don't fail
+            )
+            if not version_compatible:
+                print("WARNING: Database version may be incompatible with application version.")
+                print("Consider running migration or checking version compatibility.")
+        except DatabaseVersionError as e:
+            print(f"WARNING: Database version validation failed: {e}")
+        except Exception as e:
+            print(f"WARNING: Could not validate database version: {e}")
 
         update_db(season, do_attributes, fpl_team_id, session)
 

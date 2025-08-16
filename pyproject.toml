@@ -16,6 +16,7 @@ dependencies = [
   "pandas>=2.2.1",
   "requests>=2.31.0",
   "sqlalchemy>=2.0.27",
+  "alembic>=1.13.0",
   "tqdm>=4.66.2",
   "dateparser>=1.2.0",
   "prettytable>=3.10.0",
@@ -27,7 +28,12 @@ dependencies = [
   "html5lib>=1.1",
   "jax==0.4.24",
   "jaxlib==0.4.24",
-	"numpy>1,<2"
+	"numpy>1,<2",
+  "redis>=5.0.0",
+  "hiredis>=2.3.0",
+  "zstandard>=0.22.0",
+  "structlog>=24.1.0",
+  "orjson>=3.9.0"
 ]
 
 [tool.hatch.metadata]
@@ -47,6 +53,14 @@ dev = [
     "types-requests>=2.32.4.20250611",
     "mypy>=1.17.0",
     "types-python-dateutil>=2.9.0.20250708",
+    "pytest-benchmark>=4.0.0",
+    "locust>=2.24.0",
+    "memory-profiler>=0.60.0",
+    "psutil>=5.9.0",
+    "prometheus-client>=0.19.0",
+    "grafana-api>=1.0.3",
+    "py-spy>=0.3.14",
+    "matplotlib>=3.8.3",
 ]
 
 [project.scripts]
@@ -65,6 +79,10 @@ airsenal_dump_api = "airsenal.scripts.dump_api:main"
 airsenal_dump_db = "airsenal.scripts.dump_db_contents:main"
 airsenal_scrape_transfermarkt = "airsenal.scripts.scrape_transfermarkt:main"
 airsenal_plot = "airsenal.scripts.plot_league_standings:main"
+airsenal_analyze_logs = "airsenal.scripts.analyze_logs:main"
+airsenal_db_version = "airsenal.scripts.db_version_manager:main"
+airsenal_run_benchmarks = "airsenal.scripts.run_benchmarks:main"
+airsenal_performance_dashboard = "airsenal.scripts.performance_dashboard:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -75,7 +93,27 @@ addopts = """
 --cov=airsenal
 --cov-report=term:skip-covered
 --pdbcls=IPython.terminal.debugger:TerminalPdb
+--benchmark-skip
 """
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "benchmark: marks tests as benchmarks (select with '-m benchmark')",
+    "integration: marks tests as integration tests",
+    "performance: marks tests as performance tests"
+]
+
+[tool.pytest-benchmark]
+min_rounds = 5
+max_time = 1.0
+min_time = 0.000005
+timer = "perf_counter"
+disable_gc = true
+warmup = false
+warmup_iterations = 100000
+sort = "mean"
+columns = ["min", "max", "mean", "stddev", "median", "iqr", "outliers", "ops", "rounds", "iterations"]
+histogram = true
+group_by = "group"
 
 [tool.ruff]
 line-length = 88

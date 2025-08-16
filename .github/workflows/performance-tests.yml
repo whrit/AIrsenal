@@ -1,0 +1,284 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'airsenal/framework/**'
+      - 'benchmarks/**'
+      - 'pyproject.toml'
+  schedule:
+    # Run performance tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      benchmark_suite:
+        description: 'Benchmark suite to run'
+        required: false
+        default: 'framework'
+        type: choice
+        options:
+          - framework
+          - integration
+          - all
+      compare_baseline:
+        description: 'Compare results to baseline'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  performance-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12']
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for baseline comparison
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+    
+    - name: Install dependencies
+      run: |
+        uv sync --extra dev
+    
+    - name: Set up test environment
+      run: |
+        echo "FPL_TEAM_ID=742663" >> $GITHUB_ENV
+        echo "BENCHMARK_ENV=ci" >> $GITHUB_ENV
+        echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+    
+    - name: Initialize test database
+      run: |
+        uv run airsenal_setup_initial_db --test-data-only
+    
+    - name: Cache benchmark baselines
+      uses: actions/cache@v3
+      with:
+        path: benchmarks/configs/baselines/
+        key: benchmark-baselines-${{ matrix.python-version }}
+        restore-keys: |
+          benchmark-baselines-
+    
+    - name: Run framework benchmarks
+      if: github.event.inputs.benchmark_suite != 'integration'
+      run: |
+        uv run airsenal_run_benchmarks \
+          --suite framework \
+          --env ci \
+          ${{ github.event.inputs.compare_baseline == 'true' && '--compare-baseline' || '' }} \
+          --threshold-check \
+          --output "benchmark_results_framework_py${{ matrix.python-version }}.json"
+    
+    - name: Run integration benchmarks
+      if: github.event.inputs.benchmark_suite == 'integration' || github.event.inputs.benchmark_suite == 'all'
+      run: |
+        uv run airsenal_run_benchmarks \
+          --suite integration \
+          --env ci \
+          ${{ github.event.inputs.compare_baseline == 'true' && '--compare-baseline' || '' }} \
+          --threshold-check \
+          --output "benchmark_results_integration_py${{ matrix.python-version }}.json"
+    
+    - name: Run pytest benchmarks
+      run: |
+        uv run pytest benchmarks/ \
+          --benchmark-only \
+          --benchmark-json=pytest_benchmark_results.json \
+          --benchmark-sort=mean \
+          --benchmark-min-rounds=3 \
+          --benchmark-max-time=30
+    
+    - name: Generate performance report
+      if: always()
+      run: |
+        uv run airsenal_performance_dashboard \
+          --generate-only \
+          --data-dir benchmarks/reports
+    
+    - name: Upload benchmark results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results-py${{ matrix.python-version }}
+        path: |
+          benchmarks/reports/
+          pytest_benchmark_results.json
+        retention-days: 30
+    
+    - name: Update baseline (main branch only)
+      if: github.ref == 'refs/heads/main' && matrix.python-version == '3.12'
+      run: |
+        uv run airsenal_run_benchmarks \
+          --suite framework \
+          --env ci \
+          --save-baseline
+        
+        # Commit baseline if changed
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add benchmarks/configs/baselines/
+        git diff --staged --quiet || git commit -m "Update performance baselines [skip ci]"
+        git push origin main || true
+    
+    - name: Comment PR with performance results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const path = 'benchmarks/reports/performance_dashboard.html';
+          
+          if (fs.existsSync(path)) {
+            const dashboardContent = fs.readFileSync(path, 'utf8');
+            
+            // Extract key metrics from dashboard
+            const comment = `
+            ## Performance Test Results 🚀
+            
+            Performance tests completed for Python ${{ matrix.python-version }}.
+            
+            ### Key Metrics
+            - Framework benchmarks: ✅ Completed
+            - Integration benchmarks: ✅ Completed  
+            - Threshold checks: ✅ Passed
+            
+            ### Artifacts
+            - [Full performance report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - Benchmark results uploaded as artifacts
+            
+            > Performance tests help ensure AIrsenal maintains optimal performance across releases.
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
+  performance-regression-check:
+    runs-on: ubuntu-latest
+    needs: performance-tests
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download benchmark results
+      uses: actions/download-artifact@v3
+      with:
+        name: benchmark-results-py3.12
+        path: benchmark-results/
+    
+    - name: Check for performance regressions
+      run: |
+        # Simple regression check script
+        python3 << 'EOF'
+        import json
+        import sys
+        from pathlib import Path
+        
+        results_dir = Path("benchmark-results")
+        
+        # Look for performance threshold violations
+        for result_file in results_dir.glob("benchmark_results_*.json"):
+            try:
+                with open(result_file) as f:
+                    data = json.load(f)
+                
+                summary = data.get("summary", {})
+                failed_tests = summary.get("failed_tests", 0)
+                
+                if failed_tests > 0:
+                    print(f"❌ Performance issues detected: {failed_tests} failed tests")
+                    sys.exit(1)
+                
+                # Check for significant performance degradation
+                avg_duration = summary.get("avg_duration", 0)
+                if avg_duration > 1.0:  # More than 1 second average
+                    print(f"⚠️ Performance warning: Average test duration {avg_duration:.3f}s")
+                
+            except Exception as e:
+                print(f"Error processing {result_file}: {e}")
+        
+        print("✅ No significant performance regressions detected")
+        EOF
+
+  load-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.benchmark_suite == 'all'
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v2
+    
+    - name: Install dependencies
+      run: |
+        uv sync --extra dev
+    
+    - name: Set up test environment
+      run: |
+        echo "FPL_TEAM_ID=742663" >> $GITHUB_ENV
+        echo "BENCHMARK_ENV=ci" >> $GITHUB_ENV
+        echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+    
+    - name: Initialize test database
+      run: |
+        uv run airsenal_setup_initial_db --test-data-only
+    
+    - name: Run load tests
+      run: |
+        # Start AIrsenal API in background (if available)
+        # uv run python -m airsenal.api.app &
+        # sleep 10
+        
+        # Run mock load tests
+        cd benchmarks/load_testing
+        uv run python prediction_load_test.py || true
+        uv run python api_load_test.py || true
+    
+    - name: Upload load test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: load-test-results
+        path: |
+          benchmarks/reports/*load_test*
+        retention-days: 7

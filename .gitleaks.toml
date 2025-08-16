@@ -1,0 +1,123 @@
+# GitLeaks Configuration for AIrsenal
+# This configuration defines patterns for detecting secrets and sensitive information
+
+title = "AIrsenal Security Configuration"
+
+[extend]
+# Use the default gitleaks configuration as a base
+useDefault = true
+
+[[rules]]
+id = "fpl-credentials"
+description = "Fantasy Premier League credentials"
+regex = '''(?i)(fpl_password|fpl_login|fpl_user)\s*[:=]\s*['"]?([a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{6,})['"]?'''
+tags = ["fpl", "password", "login"]
+
+[[rules]]
+id = "redis-url"
+description = "Redis connection strings"
+regex = '''redis://[a-zA-Z0-9\.\-_:@]*:[0-9]+[/0-9]*'''
+tags = ["redis", "database", "connection"]
+
+[[rules]]
+id = "postgres-url"
+description = "PostgreSQL connection strings"
+regex = '''postgres(ql)?://[a-zA-Z0-9\.\-_:@]*:[0-9]+/[a-zA-Z0-9\-_]+'''
+tags = ["postgres", "database", "connection"]
+
+[[rules]]
+id = "api-keys"
+description = "Generic API keys"
+regex = '''(?i)(api_key|apikey|api-key)\s*[:=]\s*['"]?([a-zA-Z0-9]{20,})['"]?'''
+tags = ["api", "key", "secret"]
+
+[[rules]]
+id = "secret-keys"
+description = "Secret keys"
+regex = '''(?i)(secret_key|secretkey|secret-key)\s*[:=]\s*['"]?([a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{16,})['"]?'''
+tags = ["secret", "key"]
+
+[[rules]]
+id = "jwt-tokens"
+description = "JWT tokens"
+regex = '''eyJ[a-zA-Z0-9_\-]+\.eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+'''
+tags = ["jwt", "token"]
+
+[[rules]]
+id = "private-keys"
+description = "Private key files"
+regex = '''-----BEGIN (RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----'''
+tags = ["private", "key", "certificate"]
+
+[[rules]]
+id = "airsenal-db-path"
+description = "AIrsenal database file paths with credentials"
+regex = '''(?i)(database_url|db_url|airsenal_db)\s*[:=]\s*['"]?([^'"\s]+://[^'"\s]*:[^'"\s]*@[^'"\s]+)['"]?'''
+tags = ["database", "airsenal", "credentials"]
+
+[allowlist]
+description = "Allowlist for false positives"
+files = [
+  # Test files and examples are allowed to contain dummy secrets
+  '''.*test.*\.py''',
+  '''.*example.*\.py''',
+  '''.*mock.*\.py''',
+  '''.*dummy.*\.py''',
+  '''tests/.*''',
+  '''examples/.*''',
+  # Documentation files
+  '''.*\.md''',
+  '''.*\.rst''',
+  '''docs/.*''',
+  # Configuration files that might contain template values
+  '''.*\.example''',
+  '''.*\.template''',
+  # Build and dependency files
+  '''requirements.*\.txt''',
+  '''.*\.lock''',
+  '''pyproject\.toml''',
+]
+
+regexes = [
+  # Common false positives
+  '''password\s*[:=]\s*['"]?(your_password_here|changeme|password|123456|test)['"]?''',
+  '''api_key\s*[:=]\s*['"]?(your_api_key_here|changeme|test|example)['"]?''',
+  '''secret\s*[:=]\s*['"]?(your_secret_here|changeme|test|example)['"]?''',
+  # Test database URLs
+  '''postgresql://postgres:testpass@localhost''',
+  '''redis://localhost:6379''',
+  # Example URLs in documentation
+  '''https://example\.com''',
+  # Test team ID
+  '''742663''',
+  # Common test values
+  '''test_value''',
+  '''dummy_value''',
+  '''mock_''',
+  # Git commit hashes (not secrets)
+  '''[a-f0-9]{40}''',
+]
+
+paths = [
+  # Exclude version control directories
+  '''.git/.*''',
+  # Exclude dependency directories
+  '''.venv/.*''',
+  '''venv/.*''',
+  '''node_modules/.*''',
+  # Exclude build artifacts
+  '''build/.*''',
+  '''dist/.*''',
+  '''__pycache__/.*''',
+  '''*.pyc''',
+  # Exclude IDE files
+  '''.vscode/.*''',
+  '''.idea/.*''',
+  # Exclude temporary files
+  '''.*\.tmp''',
+  '''.*\.temp''',
+  '''tmp/.*''',
+  # Exclude log files
+  '''.*\.log''',
+  '''logs/.*''',
+]

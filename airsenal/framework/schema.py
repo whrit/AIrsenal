@@ -6,7 +6,7 @@ Use SQLAlchemy to convert between DB tables and python objects.
 from contextlib import contextmanager
 from typing import Annotated
 
-from sqlalchemy import ForeignKey, String, create_engine
+from sqlalchemy import ForeignKey, Index, String, create_engine
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -203,6 +203,57 @@ class PlayerAttributes(Base):
     selected: Mapped[int | None]
     transfers_in: Mapped[int | None]
     transfers_out: Mapped[int | None]
+
+    # Expected Goals (xG) metrics
+    xg_per_90: Mapped[float | None] = mapped_column(comment="Expected goals per 90 minutes")
+    xa_per_90: Mapped[float | None] = mapped_column(comment="Expected assists per 90 minutes")
+    xgi_per_90: Mapped[float | None] = mapped_column(comment="Expected goal involvements (xG + xA) per 90 minutes")
+
+    # Form metrics - rolling averages of FPL points
+    form_3_games: Mapped[float | None] = mapped_column(comment="Average FPL points over last 3 games")
+    form_5_games: Mapped[float | None] = mapped_column(comment="Average FPL points over last 5 games")
+    form_10_games: Mapped[float | None] = mapped_column(comment="Average FPL points over last 10 games")
+    momentum: Mapped[float | None] = mapped_column(comment="Trend indicator for recent performance (-1 to 1)")
+
+    # Fixture difficulty ratings for upcoming fixtures
+    next_3_fixture_difficulty: Mapped[float | None] = mapped_column(comment="Average difficulty rating for next 3 fixtures (1-5 scale)")
+    next_5_fixture_difficulty: Mapped[float | None] = mapped_column(comment="Average difficulty rating for next 5 fixtures (1-5 scale)")
+
+    # Player role indicators
+    is_penalty_taker: Mapped[bool] = mapped_column(default=False, comment="Whether player is primary penalty taker")
+    is_free_kick_taker: Mapped[bool] = mapped_column(default=False, comment="Whether player is primary free kick taker")
+    is_corner_taker: Mapped[bool] = mapped_column(default=False, comment="Whether player is primary corner taker")
+    role_confidence: Mapped[float | None] = mapped_column(comment="Confidence score for set piece roles (0-1 scale)")
+
+    # Advanced performance statistics per 90 minutes
+    shots_per_90: Mapped[float | None] = mapped_column(comment="Total shots per 90 minutes")
+    key_passes_per_90: Mapped[float | None] = mapped_column(comment="Key passes (passes leading to shots) per 90 minutes")
+    tackles_per_90: Mapped[float | None] = mapped_column(comment="Successful tackles per 90 minutes")
+    interceptions_per_90: Mapped[float | None] = mapped_column(comment="Interceptions per 90 minutes")
+    clearances_per_90: Mapped[float | None] = mapped_column(comment="Clearances per 90 minutes")
+
+    # Define indexes for frequently queried fields to optimize performance
+    __table_args__ = (
+        # Composite index for player lookups across seasons/gameweeks
+        Index("ix_player_season_gameweek", "player_id", "season", "gameweek"),
+        
+        # Indexes for form metrics - frequently used for player selection
+        Index("ix_form_3_games", "form_3_games"),
+        Index("ix_form_5_games", "form_5_games"),
+        
+        # Indexes for xG metrics - key performance indicators
+        Index("ix_xg_per_90", "xg_per_90"),
+        Index("ix_xgi_per_90", "xgi_per_90"),
+        
+        # Index for fixture difficulty - used in transfer optimization
+        Index("ix_next_3_fixture_difficulty", "next_3_fixture_difficulty"),
+        
+        # Composite index for role-based queries (position + roles)
+        Index("ix_position_penalty_taker", "position", "is_penalty_taker"),
+        
+        # Index for momentum-based filtering
+        Index("ix_momentum", "momentum"),
+    )
 
     def __str__(self):
         return (
@@ -420,6 +471,362 @@ class SessionBudget(Base):
     id: Mapped[intpk] = mapped_column(autoincrement=True)
     session_id: Mapped[str100]
     budget: Mapped[int]
+
+
+class ModelRegistry(Base):
+    """Registry for model types and configurations"""
+    __tablename__ = "model_registry"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    model_name: Mapped[str100]  # e.g., "player_model", "team_model"
+    model_type: Mapped[str100]  # e.g., "NumpyroPlayerModel", "ExtendedDixonColesMatchPredictor"
+    description: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[str100]  # ISO datetime string
+    created_by: Mapped[str100]  # Author/creator
+    is_active: Mapped[bool] = mapped_column(default=True)
+    
+    # Relationships
+    versions: Mapped[list["ModelVersion"]] = relationship(back_populates="registry")
+
+    def __str__(self):
+        return f"ModelRegistry({self.model_name}: {self.model_type})"
+
+
+class ModelVersion(Base):
+    """Specific versions of models with metadata and performance tracking"""
+    __tablename__ = "model_version"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    registry_id: Mapped[int] = mapped_column(ForeignKey("model_registry.id"))
+    version: Mapped[str100]  # Semantic version (e.g., "1.0.0", "1.1.0-beta")
+    config_hash: Mapped[str100]  # Hash of training configuration
+    training_data_version: Mapped[str100]  # Version/hash of training data used
+    
+    # Training metadata
+    training_params: Mapped[str | None] = mapped_column(String(1000))  # JSON string of parameters
+    feature_set: Mapped[str | None] = mapped_column(String(500))  # Description of features used
+    training_date: Mapped[str100]  # ISO datetime string
+    training_duration_seconds: Mapped[int | None]
+    
+    # Performance metrics
+    validation_mae: Mapped[float | None]
+    validation_rmse: Mapped[float | None]
+    validation_accuracy: Mapped[float | None]
+    cross_validation_score: Mapped[float | None]
+    
+    # Status and deployment
+    status: Mapped[str100]  # "training", "ready", "deployed", "deprecated", "failed"
+    is_production: Mapped[bool] = mapped_column(default=False)
+    deployment_date: Mapped[str100 | None]
+    
+    # Metadata
+    notes: Mapped[str | None] = mapped_column(String(1000))
+    tags: Mapped[str | None] = mapped_column(String(500))  # Comma-separated tags
+    
+    # Relationships
+    registry: Mapped["ModelRegistry"] = relationship(back_populates="versions")
+    artifacts: Mapped[list["ModelArtifact"]] = relationship(back_populates="version")
+    performance_records: Mapped[list["ModelPerformance"]] = relationship(back_populates="version")
+    experiments: Mapped[list["ModelExperiment"]] = relationship(
+        back_populates="model_version",
+        foreign_keys="ModelExperiment.model_version_id"
+    )
+
+    def __str__(self):
+        return f"ModelVersion({self.registry.model_name} v{self.version})"
+
+
+class ModelArtifact(Base):
+    """Storage metadata for model artifacts (serialized models, weights, etc.)"""
+    __tablename__ = "model_artifact"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("model_version.id"))
+    artifact_type: Mapped[str100]  # "model_weights", "full_model", "metadata", "training_state"
+    file_path: Mapped[str | None] = mapped_column(String(500))  # Local file path
+    s3_path: Mapped[str | None] = mapped_column(String(500))  # S3 URL if using cloud storage
+    file_size_bytes: Mapped[int | None]
+    checksum: Mapped[str100 | None]  # MD5 or SHA256 hash for integrity
+    compression: Mapped[str100 | None]  # "gzip", "bzip2", "none"
+    serialization_format: Mapped[str100]  # "pickle", "joblib", "jax", "numpy"
+    created_at: Mapped[str100]  # ISO datetime string
+    
+    # Relationships
+    version: Mapped["ModelVersion"] = relationship(back_populates="artifacts")
+
+    def __str__(self):
+        return f"ModelArtifact({self.artifact_type} for {self.version})"
+
+
+class ModelPerformance(Base):
+    """Performance metrics for models on specific datasets/time periods"""
+    __tablename__ = "model_performance"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("model_version.id"))
+    evaluation_date: Mapped[str100]  # ISO datetime string
+    dataset_type: Mapped[str100]  # "validation", "test", "production", "backtest"
+    time_period_start: Mapped[str100 | None]  # ISO datetime string
+    time_period_end: Mapped[str100 | None]  # ISO datetime string
+    
+    # Core metrics
+    mae: Mapped[float | None]  # Mean Absolute Error
+    rmse: Mapped[float | None]  # Root Mean Square Error
+    accuracy: Mapped[float | None]  # Classification accuracy if applicable
+    precision: Mapped[float | None]
+    recall: Mapped[float | None]
+    f1_score: Mapped[float | None]
+    
+    # Domain-specific metrics
+    prediction_correlation: Mapped[float | None]  # Correlation with actual points
+    top_transfer_accuracy: Mapped[float | None]  # Accuracy of top transfer suggestions
+    points_captured: Mapped[float | None]  # Percentage of possible points captured
+    
+    # Additional metrics as JSON
+    additional_metrics: Mapped[str | None] = mapped_column(String(1000))  # JSON string
+    
+    # Relationships
+    version: Mapped["ModelVersion"] = relationship(back_populates="performance_records")
+
+    def __str__(self):
+        return f"ModelPerformance({self.version} on {self.dataset_type}: MAE={self.mae})"
+
+
+class ModelExperiment(Base):
+    """A/B testing experiments comparing model versions"""
+    __tablename__ = "model_experiment"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    experiment_name: Mapped[str100]
+    description: Mapped[str | None] = mapped_column(String(500))
+    
+    # Experiment configuration
+    model_version_id: Mapped[int] = mapped_column(ForeignKey("model_version.id"))
+    control_version_id: Mapped[int | None] = mapped_column(ForeignKey("model_version.id"))
+    traffic_split: Mapped[float] = mapped_column(default=0.5)  # Percentage of traffic for this version
+    
+    # Experiment timeline
+    start_date: Mapped[str100]  # ISO datetime string
+    end_date: Mapped[str100 | None]  # ISO datetime string
+    status: Mapped[str100]  # "planned", "running", "completed", "stopped"
+    
+    # Results
+    winner_version_id: Mapped[int | None] = mapped_column(ForeignKey("model_version.id"))
+    confidence_level: Mapped[float | None]  # Statistical confidence in results
+    
+    # Metadata
+    created_by: Mapped[str100]
+    notes: Mapped[str | None] = mapped_column(String(1000))
+    
+    # Relationships
+    model_version: Mapped["ModelVersion"] = relationship(
+        back_populates="experiments",
+        foreign_keys=[model_version_id]
+    )
+
+    def __str__(self):
+        return f"ModelExperiment({self.experiment_name}: {self.status})"
+
+class FeatureDefinition(Base):
+    """Registry of available features with their computation logic and metadata."""
+    __tablename__ = "feature_definition"
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    name: Mapped[str100]  # e.g., "rolling_goals_5", "xg_form", "fixture_difficulty"
+    version: Mapped[str100]  # semantic versioning for computation logic
+    feature_type: Mapped[str100]  # "player", "team", "fixture", "external"
+    data_type: Mapped[str100]  # "float", "int", "boolean", "string"
+    description: Mapped[str100_optional]
+    computation_logic: Mapped[str | None] = mapped_column(String(1000))  # JSON config
+    dependencies: Mapped[str100_optional]  # comma-separated feature names
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[str100]
+    updated_at: Mapped[str100]
+    # Relationship to computed values
+    computed_features: Mapped[list["ComputedFeature"]] = relationship(back_populates="feature_definition")
+
+    def __str__(self):
+        return f"{self.name}:{self.version} ({self.feature_type})"
+
+
+class ComputedFeature(Base):
+    """Computed feature values for entities (players, teams, fixtures) at specific times."""
+    __tablename__ = "computed_feature"
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    feature_definition_id: Mapped[int] = mapped_column(ForeignKey("feature_definition.id"))
+    feature_definition: Mapped["FeatureDefinition"] = relationship(back_populates="computed_features")
+    entity_type: Mapped[str100]  # "player", "team", "fixture"
+    entity_id: Mapped[int]  # player_id, team_id, fixture_id
+    gameweek: Mapped[int | None]  # for time-aware features
+    season: Mapped[str100]
+    value: Mapped[float | None]  # stored as float, cast as needed
+    string_value: Mapped[str100_optional]  # for non-numeric features
+    computed_at: Mapped[str100]  # ISO timestamp when computed
+    ttl_expires_at: Mapped[str100_optional]  # cache expiration
+
+    def __str__(self):
+        return f"{self.feature_definition.name} for {self.entity_type}:{self.entity_id} = {self.value}"
+
+
+class FeatureCache(Base):
+    """Hot cache for frequently accessed features to enable sub-second serving."""
+    __tablename__ = "feature_cache"
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    cache_key: Mapped[str100]  # composite key: feature_name:entity_type:entity_id:context
+    feature_name: Mapped[str100]
+    entity_type: Mapped[str100]
+    entity_id: Mapped[int]
+    value: Mapped[float | None]
+    string_value: Mapped[str100_optional]
+    cached_at: Mapped[str100]
+    expires_at: Mapped[str100]
+    hit_count: Mapped[int] = mapped_column(default=0)  # for cache analytics
+
+    def __str__(self):
+        return f"Cache[{self.cache_key}] = {self.value or self.string_value}"
+
+
+class FeatureTimeSeries(Base):
+    """Time-series storage for rolling window computations and historical analysis."""
+    __tablename__ = "feature_timeseries"
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    entity_type: Mapped[str100]
+    entity_id: Mapped[int]
+    metric_name: Mapped[str100]  # "goals", "assists", "minutes", "xg", etc.
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    timestamp: Mapped[str100]  # ISO timestamp for fine-grained ordering
+    value: Mapped[float]
+    context: Mapped[str100_optional]  # additional metadata as JSON
+
+    def __str__(self):
+        return f"{self.metric_name} for {self.entity_type}:{self.entity_id} @ GW{self.gameweek} = {self.value}"
+
+
+class DatabaseVersion(Base):
+    """Database schema version tracking for AIrsenal compatibility management"""
+    __tablename__ = "database_version"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    version: Mapped[str100]  # Semantic version (e.g., "1.11.0", "1.12.0-beta")
+    schema_version: Mapped[str100]  # Schema-specific version for tracking DB structure changes
+    app_version: Mapped[str100]  # Application version that created/updated this schema
+    migration_id: Mapped[str100 | None]  # Alembic migration ID if applicable
+    
+    # Migration metadata
+    applied_at: Mapped[str100]  # ISO datetime string when version was applied
+    applied_by: Mapped[str100]  # User or system that applied the version
+    migration_type: Mapped[str100]  # "initial", "upgrade", "rollback", "manual"
+    migration_source: Mapped[str100]  # "alembic", "manual", "automated"
+    
+    # Migration details
+    migration_description: Mapped[str | None] = mapped_column(String(500))
+    migration_checksum: Mapped[str100 | None]  # MD5 hash of migration script content
+    rollback_info: Mapped[str | None] = mapped_column(String(1000))  # JSON string with rollback details
+    
+    # Compatibility information
+    min_app_version: Mapped[str100 | None]  # Minimum app version compatible with this schema
+    max_app_version: Mapped[str100 | None]  # Maximum app version compatible with this schema
+    compatibility_notes: Mapped[str | None] = mapped_column(String(500))
+    
+    # Status and validation
+    is_active: Mapped[bool] = mapped_column(default=True)  # Whether this version is currently active
+    validation_status: Mapped[str100] = mapped_column(default="pending")  # "pending", "validated", "failed"
+    validation_errors: Mapped[str | None] = mapped_column(String(1000))  # JSON string of validation errors
+    
+    # Performance impact tracking
+    migration_duration_seconds: Mapped[float | None]  # How long the migration took
+    affected_tables: Mapped[str | None] = mapped_column(String(500))  # Comma-separated list of affected table names
+    records_migrated: Mapped[int | None]  # Number of records affected by migration
+    
+    # Relationships with migration history
+    migration_history: Mapped[list["MigrationHistory"]] = relationship(back_populates="database_version")
+
+    def __str__(self):
+        return f"DatabaseVersion(v{self.version}, schema:{self.schema_version}, applied:{self.applied_at})"
+
+
+class MigrationHistory(Base):
+    """Detailed history of all database migrations for audit and rollback purposes"""
+    __tablename__ = "migration_history"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    database_version_id: Mapped[int] = mapped_column(ForeignKey("database_version.id"))
+    database_version: Mapped["DatabaseVersion"] = relationship(back_populates="migration_history")
+    
+    # Migration identification
+    migration_name: Mapped[str100]  # Human-readable migration name
+    migration_hash: Mapped[str100]  # Unique hash identifying this specific migration
+    sequence_number: Mapped[int]  # Order of migration execution within a version
+    
+    # Execution details
+    executed_at: Mapped[str100]  # ISO datetime string
+    execution_duration_seconds: Mapped[float]
+    executed_by: Mapped[str100]  # User or automated system
+    execution_context: Mapped[str100]  # "deployment", "development", "testing", "rollback"
+    
+    # Migration content and impact
+    migration_sql: Mapped[str | None] = mapped_column(String(10000))  # SQL executed (if applicable)
+    tables_affected: Mapped[str | None] = mapped_column(String(500))  # Comma-separated table names
+    records_before: Mapped[int | None]  # Total records before migration
+    records_after: Mapped[int | None]  # Total records after migration
+    records_changed: Mapped[int | None]  # Number of records modified
+    
+    # Success and error tracking
+    status: Mapped[str100]  # "success", "failed", "partial", "rolled_back"
+    error_message: Mapped[str | None] = mapped_column(String(1000))
+    warning_count: Mapped[int] = mapped_column(default=0)
+    
+    # Rollback information
+    rollback_sql: Mapped[str | None] = mapped_column(String(10000))  # SQL to rollback this migration
+    rollback_tested: Mapped[bool] = mapped_column(default=False)  # Whether rollback has been tested
+    rollback_notes: Mapped[str | None] = mapped_column(String(500))
+    
+    # Performance and monitoring
+    memory_usage_mb: Mapped[float | None]  # Peak memory usage during migration
+    cpu_usage_percent: Mapped[float | None]  # Average CPU usage during migration
+    lock_conflicts: Mapped[int] = mapped_column(default=0)  # Number of lock conflicts encountered
+    
+    # Dependencies and prerequisites
+    depends_on: Mapped[str | None] = mapped_column(String(500))  # Comma-separated list of prerequisite migrations
+    blocks: Mapped[str | None] = mapped_column(String(500))  # Comma-separated list of migrations blocked by this one
+
+    def __str__(self):
+        return f"MigrationHistory({self.migration_name}, status:{self.status}, executed:{self.executed_at})"
+
+
+class SchemaCompatibility(Base):
+    """Matrix defining compatibility between application versions and database schema versions"""
+    __tablename__ = "schema_compatibility"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    app_version_min: Mapped[str100]  # Minimum application version
+    app_version_max: Mapped[str100]  # Maximum application version  
+    schema_version_min: Mapped[str100]  # Minimum compatible schema version
+    schema_version_max: Mapped[str100]  # Maximum compatible schema version
+    
+    # Compatibility metadata
+    compatibility_level: Mapped[str100]  # "full", "limited", "deprecated", "incompatible"
+    compatibility_notes: Mapped[str | None] = mapped_column(String(500))
+    migration_required: Mapped[bool] = mapped_column(default=False)
+    migration_priority: Mapped[str100] = mapped_column(default="normal")  # "critical", "high", "normal", "low"
+    
+    # Validation and testing
+    tested_combinations: Mapped[str | None] = mapped_column(String(1000))  # JSON list of tested version combinations
+    known_issues: Mapped[str | None] = mapped_column(String(1000))  # JSON list of known compatibility issues
+    workarounds: Mapped[str | None] = mapped_column(String(1000))  # JSON list of available workarounds
+    
+    # Lifecycle management
+    created_at: Mapped[str100]
+    updated_at: Mapped[str100]
+    deprecated_at: Mapped[str100 | None]
+    removed_at: Mapped[str100 | None]
+    
+    # Performance impact
+    performance_impact: Mapped[str100] = mapped_column(default="none")  # "none", "low", "medium", "high"
+    performance_notes: Mapped[str | None] = mapped_column(String(500))
+
+    def __str__(self):
+        return f"SchemaCompatibility(app:{self.app_version_min}-{self.app_version_max}, schema:{self.schema_version_min}-{self.schema_version_max}, level:{self.compatibility_level})"
 
 
 def get_connection_string() -> str:

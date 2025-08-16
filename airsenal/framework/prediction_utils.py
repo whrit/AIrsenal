@@ -12,6 +12,10 @@ import pandas as pd
 from scipy.stats import multinomial
 from sqlalchemy.orm.session import Session
 
+# Import structured logging
+from airsenal.framework.logging_config import get_logger, set_correlation_id, set_context
+from airsenal.framework.logging_utils import log_prediction, prediction_logger, timed
+
 from airsenal.framework.FPL_scoring_rules import (
     get_appearance_points,
     points_for_assist,
@@ -321,6 +325,8 @@ def get_card_points(player_id: int, minutes: int | float, df_cards: pd.Series) -
     return 0
 
 
+@log_prediction(model_name="team_player_model", include_inputs=True, include_outputs=True)
+@timed(operation="calc_predicted_points_for_player", threshold=1.0)
 def calc_predicted_points_for_player(
     player: Player | str | int,
     fixture_goal_probs: dict,
@@ -340,14 +346,40 @@ def calc_predicted_points_for_player(
     N goals, and player-level model to get the chance of player scoring
     or assisting given that their team scores.
     """
+    # Set correlation ID for this prediction if not already set
+    from airsenal.framework.logging_config import get_correlation_id
+    if not get_correlation_id():
+        set_correlation_id()
+    
     if isinstance(player, str | int):
         p = get_player(player, dbsession=dbsession)
         if p is None:
             msg = f"Player {player} not found in database"
+            prediction_logger.log_prediction_result(
+                model_name="team_player_model",
+                player_id=player if isinstance(player, int) else 0,
+                gameweek=gw_range[0] if gw_range else NEXT_GAMEWEEK,
+                predicted_points=0.0,
+                confidence=0.0,
+            )
             raise ValueError(msg)
         player = p
 
-    message = f"Points prediction for player {player}"
+    # Set context for this prediction
+    set_context(
+        player_id=player.id,
+        player_name=player.name,
+        season=season,
+        tag=tag
+    )
+
+    prediction_logger.logger.info(
+        "Starting player prediction",
+        player_id=player.id,
+        player_name=player.name,
+        season=season,
+        event_type="prediction_start"
+    )
 
     if not gw_range:
         # by default, go for next three matches
@@ -368,7 +400,27 @@ def calc_predicted_points_for_player(
     position = player.position(season)
     if position is None or team is None:
         msg = f"Player {player} has missing team or position for season {season}"
+        prediction_logger.logger.error(
+            "Player validation failed",
+            player_id=player.id,
+            player_name=player.name,
+            season=season,
+            position=position,
+            team=team,
+            error=msg,
+            event_type="prediction_validation_error"
+        )
         raise ValueError(msg)
+    
+    prediction_logger.logger.info(
+        "Player validation completed",
+        player_id=player.id,
+        team_name=team.name if team else None,
+        position=position,
+        gameweek_range=gw_range,
+        fixtures_behind=fixtures_behind,
+        event_type="prediction_setup"
+    )
     fixtures = get_fixtures_for_player(
         player, season, gw_range=gw_range, dbsession=dbsession
     )

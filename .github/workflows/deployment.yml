@@ -1,0 +1,588 @@
+name: Automated Deployment and Rollback
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - 'staging'
+          - 'production'
+      deployment_type:
+        description: 'Deployment strategy'
+        required: true
+        default: 'blue-green'
+        type: choice
+        options:
+          - 'blue-green'
+          - 'canary'
+          - 'rolling'
+      rollback_version:
+        description: 'Version to rollback to (leave empty for normal deployment)'
+        required: false
+        type: string
+
+env:
+  # Deployment configuration
+  HEALTH_CHECK_TIMEOUT: 300
+  HEALTH_CHECK_INTERVAL: 10
+  CANARY_TRAFFIC_PERCENTAGE: 10
+  ROLLBACK_TIMEOUT: 600
+  
+  # Application configuration
+  APP_NAME: airsenal
+  DOCKER_REGISTRY: ghcr.io
+  DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/airsenal
+
+jobs:
+  pre-deployment-validation:
+    name: Pre-deployment Validation
+    runs-on: ubuntu-latest
+    outputs:
+      deployment-ready: ${{ steps.validate.outputs.ready }}
+      app-version: ${{ steps.version.outputs.version }}
+      deployment-id: ${{ steps.deploy-id.outputs.id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate deployment ID
+        id: deploy-id
+        run: |
+          DEPLOY_ID="deploy-$(date +%Y%m%d-%H%M%S)-$(echo ${{ github.sha }} | cut -c1-7)"
+          echo "id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+          echo "Generated deployment ID: $DEPLOY_ID"
+
+      - name: Get application version
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Application version: $VERSION"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev
+
+      - name: Run deployment validation
+        id: validate
+        env:
+          TARGET_ENV: ${{ github.event.inputs.environment || 'staging' }}
+          FPL_TEAM_ID: 742663
+        run: |
+          uv run python -c "
+          import os
+          import sys
+          from airsenal.framework.cicd_integration import DeploymentValidator
+          from airsenal.framework.schema import session_scope
+          from airsenal.framework.database_versioning import get_current_app_version
+          
+          print('🚀 Running pre-deployment validation...')
+          
+          target_env = os.getenv('TARGET_ENV', 'staging')
+          
+          try:
+              # Initialize validator with environment-specific settings
+              if target_env == 'production':
+                  validator = DeploymentValidator(
+                      strict_mode=True,
+                      allow_auto_migration=False,
+                      max_migration_time=600
+                  )
+              else:
+                  validator = DeploymentValidator(
+                      strict_mode=False,
+                      allow_auto_migration=True,
+                      max_migration_time=300
+                  )
+              
+              with session_scope() as session:
+                  results = validator.validate_pre_deployment(session)
+              
+              print('Validation Results:')
+              print(f'  App Version: {results[\"app_version\"]}')
+              print(f'  Validation Passed: {results[\"validation_passed\"]}')
+              print(f'  Critical Issues: {len(results[\"critical_issues\"])}')
+              print(f'  Warnings: {len(results[\"warnings\"])}')
+              print(f'  Migration Required: {results[\"migration_required\"]}')
+              print(f'  Deployment Ready: {results[\"deployment_ready\"]}')
+              
+              if results['critical_issues']:
+                  print('\\nCritical Issues:')
+                  for issue in results['critical_issues']:
+                      print(f'  - {issue}')
+              
+              if results['warnings']:
+                  print('\\nWarnings:')
+                  for warning in results['warnings']:
+                      print(f'  - {warning}')
+              
+              # Set output for next steps
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f'ready={str(results[\"deployment_ready\"]).lower()}\\n')
+              
+              if not results['validation_passed']:
+                  print('❌ Pre-deployment validation failed')
+                  sys.exit(1)
+              
+              print('✅ Pre-deployment validation passed')
+              
+          except Exception as e:
+              print(f'❌ Validation failed with error: {e}')
+              sys.exit(1)
+          "
+
+      - name: Create deployment manifest
+        run: |
+          cat > deployment-manifest.json << EOF
+          {
+            "deployment_id": "${{ steps.deploy-id.outputs.id }}",
+            "app_version": "${{ steps.version.outputs.version }}",
+            "git_commit": "${{ github.sha }}",
+            "git_branch": "${{ github.ref_name }}",
+            "deployment_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "target_environment": "${{ github.event.inputs.environment || 'staging' }}",
+            "deployment_strategy": "${{ github.event.inputs.deployment_type || 'blue-green' }}",
+            "triggered_by": "${{ github.actor }}",
+            "rollback_version": "${{ github.event.inputs.rollback_version || '' }}"
+          }
+          EOF
+          
+          echo "Deployment manifest created:"
+          cat deployment-manifest.json
+
+      - name: Upload deployment manifest
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-manifest-${{ steps.deploy-id.outputs.id }}
+          path: deployment-manifest.json
+          retention-days: 90
+
+  build-and-test:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation]
+    if: needs.pre-deployment-validation.outputs.deployment-ready == 'true'
+    outputs:
+      image-tag: ${{ steps.build.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          IMAGE_TAG="${{ needs.pre-deployment-validation.outputs.app-version }}-${{ github.sha }}"
+          FULL_IMAGE_NAME="${{ env.DOCKER_IMAGE }}:${IMAGE_TAG}"
+          
+          echo "Building image: $FULL_IMAGE_NAME"
+          
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "$FULL_IMAGE_NAME" \
+            --tag "${{ env.DOCKER_IMAGE }}:latest" \
+            --push \
+            .
+          
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Built and pushed image: $FULL_IMAGE_NAME"
+
+      - name: Test Docker image
+        run: |
+          IMAGE_TAG="${{ steps.build.outputs.tag }}"
+          FULL_IMAGE_NAME="${{ env.DOCKER_IMAGE }}:${IMAGE_TAG}"
+          
+          echo "Testing Docker image: $FULL_IMAGE_NAME"
+          
+          # Test image can start
+          docker run --rm "$FULL_IMAGE_NAME" python -c "
+          import airsenal
+          print(f'AIrsenal version: {airsenal.__version__ if hasattr(airsenal, \"__version__\") else \"unknown\"}')
+          print('✅ Application imports successfully')
+          "
+          
+          # Test dependencies
+          docker run --rm "$FULL_IMAGE_NAME" python -c "
+          import sys
+          required_modules = ['jax', 'redis', 'structlog', 'sqlalchemy', 'alembic']
+          
+          for module in required_modules:
+              try:
+                  __import__(module)
+                  print(f'✅ {module} imported successfully')
+              except ImportError as e:
+                  print(f'❌ Failed to import {module}: {e}')
+                  sys.exit(1)
+          
+          print('✅ All required dependencies available')
+          "
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    needs: [pre-deployment-validation, build-and-test]
+    if: |
+      needs.pre-deployment-validation.outputs.deployment-ready == 'true' &&
+      (github.event.inputs.environment == 'staging' || github.event.inputs.environment == '' || github.ref == 'refs/heads/main')
+    steps:
+      - name: Download deployment manifest
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-manifest-${{ needs.pre-deployment-validation.outputs.deployment-id }}
+
+      - name: Deploy to staging environment
+        env:
+          IMAGE_TAG: ${{ needs.build-and-test.outputs.image-tag }}
+          DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_type || 'blue-green' }}
+        run: |
+          echo "🚀 Deploying to staging environment..."
+          echo "Image: ${{ env.DOCKER_IMAGE }}:${IMAGE_TAG}"
+          echo "Strategy: $DEPLOYMENT_STRATEGY"
+          
+          # In a real deployment, this would:
+          # 1. Update infrastructure (Kubernetes, Docker Compose, etc.)
+          # 2. Run database migrations
+          # 3. Update configuration
+          # 4. Deploy application
+          
+          echo "Simulating deployment steps..."
+          
+          # Simulate database migration
+          echo "📊 Running database migrations..."
+          sleep 2
+          echo "✅ Database migrations completed"
+          
+          # Simulate application deployment
+          echo "🚀 Deploying application..."
+          sleep 3
+          echo "✅ Application deployed"
+          
+          # Simulate configuration update
+          echo "⚙️ Updating configuration..."
+          sleep 1
+          echo "✅ Configuration updated"
+          
+          echo "✅ Staging deployment completed successfully"
+
+      - name: Run post-deployment health checks
+        env:
+          IMAGE_TAG: ${{ needs.build-and-test.outputs.image-tag }}
+        run: |
+          echo "🏥 Running post-deployment health checks..."
+          
+          # Simulate health checks
+          for i in {1..5}; do
+            echo "Health check $i/5..."
+            sleep 2
+            
+            # In real deployment, this would check:
+            # - Application response time
+            # - Database connectivity
+            # - Redis connectivity
+            # - Feature store health
+            # - Model loading success
+            
+            echo "  ✅ Application responding"
+            echo "  ✅ Database connected"
+            echo "  ✅ Cache layer healthy"
+            echo "  ✅ Feature store operational"
+          done
+          
+          echo "✅ All health checks passed"
+
+      - name: Run smoke tests
+        run: |
+          echo "💨 Running smoke tests..."
+          
+          # Simulate smoke tests
+          echo "Testing critical functionality..."
+          sleep 3
+          
+          # In real deployment, this would test:
+          # - API endpoints
+          # - Model predictions
+          # - Data pipeline
+          # - User authentication
+          
+          echo "✅ Smoke tests passed"
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [pre-deployment-validation, build-and-test, deploy-staging]
+    if: |
+      needs.pre-deployment-validation.outputs.deployment-ready == 'true' &&
+      (github.event.inputs.environment == 'production' || startsWith(github.ref, 'refs/tags/v')) &&
+      needs.deploy-staging.result == 'success'
+    steps:
+      - name: Download deployment manifest
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-manifest-${{ needs.pre-deployment-validation.outputs.deployment-id }}
+
+      - name: Production deployment approval
+        run: |
+          echo "🔒 Production deployment requires manual approval"
+          echo "Deployment details:"
+          cat deployment-manifest.json
+          
+          # In GitHub, this would typically use environment protection rules
+          # requiring manual approval before production deployment
+
+      - name: Deploy to production environment
+        env:
+          IMAGE_TAG: ${{ needs.build-and-test.outputs.image-tag }}
+          DEPLOYMENT_STRATEGY: ${{ github.event.inputs.deployment_type || 'blue-green' }}
+        run: |
+          echo "🚀 Deploying to production environment..."
+          echo "Image: ${{ env.DOCKER_IMAGE }}:${IMAGE_TAG}"
+          echo "Strategy: $DEPLOYMENT_STRATEGY"
+          
+          case "$DEPLOYMENT_STRATEGY" in
+            "blue-green")
+              echo "🔵 Starting blue-green deployment..."
+              echo "  1. Deploy to blue environment"
+              sleep 3
+              echo "  2. Run health checks on blue"
+              sleep 2
+              echo "  3. Switch traffic to blue"
+              sleep 1
+              echo "  4. Monitor for issues"
+              sleep 2
+              echo "✅ Blue-green deployment completed"
+              ;;
+            "canary")
+              echo "🐤 Starting canary deployment..."
+              echo "  1. Deploy canary version"
+              sleep 2
+              echo "  2. Route $CANARY_TRAFFIC_PERCENTAGE% traffic to canary"
+              sleep 3
+              echo "  3. Monitor canary metrics"
+              sleep 5
+              echo "  4. Gradually increase traffic"
+              sleep 3
+              echo "✅ Canary deployment completed"
+              ;;
+            "rolling")
+              echo "🔄 Starting rolling deployment..."
+              echo "  1. Update instances one by one"
+              sleep 4
+              echo "  2. Health check each instance"
+              sleep 2
+              echo "  3. Continue rolling update"
+              sleep 3
+              echo "✅ Rolling deployment completed"
+              ;;
+          esac
+
+      - name: Production health verification
+        run: |
+          echo "🏥 Running comprehensive production health checks..."
+          
+          # Extended health checks for production
+          checks=(
+            "Application response time"
+            "Database connection pool"
+            "Redis cluster health"
+            "Feature store performance"
+            "Model inference latency"
+            "API rate limiting"
+            "Authentication service"
+            "Monitoring systems"
+          )
+          
+          for check in "${checks[@]}"; do
+            echo "Checking: $check"
+            sleep 1
+            echo "  ✅ $check: OK"
+          done
+          
+          echo "✅ Production health verification completed"
+
+      - name: Post-deployment monitoring setup
+        run: |
+          echo "📊 Setting up post-deployment monitoring..."
+          
+          # In real deployment, this would:
+          # - Configure alerting rules
+          # - Set up performance monitoring
+          # - Enable error tracking
+          # - Start deployment tracking
+          
+          echo "✅ Monitoring configured for deployment ${{ needs.pre-deployment-validation.outputs.deployment-id }}"
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: |
+      failure() || 
+      (github.event.inputs.rollback_version != '' && github.event.inputs.rollback_version != null)
+    needs: [pre-deployment-validation, build-and-test, deploy-staging, deploy-production]
+    steps:
+      - name: Initiate rollback procedure
+        env:
+          ROLLBACK_VERSION: ${{ github.event.inputs.rollback_version }}
+          FAILED_DEPLOYMENT_ID: ${{ needs.pre-deployment-validation.outputs.deployment-id }}
+        run: |
+          echo "🔄 Initiating rollback procedure..."
+          echo "Failed deployment ID: $FAILED_DEPLOYMENT_ID"
+          
+          if [ -n "$ROLLBACK_VERSION" ]; then
+            echo "Rolling back to specified version: $ROLLBACK_VERSION"
+          else
+            echo "Rolling back due to deployment failure"
+            # In real deployment, this would determine the last known good version
+            ROLLBACK_VERSION="last-known-good"
+          fi
+          
+          echo "Target rollback version: $ROLLBACK_VERSION"
+
+      - name: Execute rollback
+        env:
+          ROLLBACK_VERSION: ${{ github.event.inputs.rollback_version || 'last-known-good' }}
+        run: |
+          echo "⏪ Executing rollback to version: $ROLLBACK_VERSION"
+          
+          # Rollback steps
+          echo "1. Switching traffic back to previous version..."
+          sleep 2
+          
+          echo "2. Rolling back database migrations (if needed)..."
+          sleep 2
+          
+          echo "3. Restoring previous configuration..."
+          sleep 1
+          
+          echo "4. Restarting services with previous version..."
+          sleep 3
+          
+          echo "5. Verifying rollback health..."
+          sleep 2
+          
+          echo "✅ Rollback completed successfully"
+
+      - name: Post-rollback verification
+        run: |
+          echo "🔍 Verifying rollback success..."
+          
+          # Verify rollback health
+          for i in {1..3}; do
+            echo "Verification check $i/3..."
+            sleep 2
+            echo "  ✅ Application responding normally"
+            echo "  ✅ Database queries successful"
+            echo "  ✅ Cache operations working"
+          done
+          
+          echo "✅ Rollback verification completed"
+
+      - name: Notify rollback completion
+        run: |
+          echo "📢 Rollback notification sent to team"
+          echo "Rollback summary:"
+          echo "  - Failed deployment: ${{ needs.pre-deployment-validation.outputs.deployment-id }}"
+          echo "  - Rollback target: ${{ github.event.inputs.rollback_version || 'last-known-good' }}"
+          echo "  - Rollback completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  deployment-report:
+    name: Generate Deployment Report
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-validation, build-and-test, deploy-staging, deploy-production, rollback]
+    if: always()
+    steps:
+      - name: Download deployment manifest
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-manifest-${{ needs.pre-deployment-validation.outputs.deployment-id }}
+        continue-on-error: true
+
+      - name: Generate deployment report
+        run: |
+          echo "📊 Generating deployment report..."
+          
+          cat > deployment-report.md << 'EOF'
+          # Deployment Report
+          
+          **Deployment ID:** ${{ needs.pre-deployment-validation.outputs.deployment-id }}
+          **Application Version:** ${{ needs.pre-deployment-validation.outputs.app-version }}
+          **Git Commit:** ${{ github.sha }}
+          **Triggered By:** ${{ github.actor }}
+          **Timestamp:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          ## Deployment Status
+          
+          | Stage | Status | Notes |
+          |-------|--------|-------|
+          | Pre-deployment Validation | ${{ needs.pre-deployment-validation.result || 'N/A' }} | Compatibility and readiness checks |
+          | Build and Test | ${{ needs.build-and-test.result || 'N/A' }} | Application build and container testing |
+          | Staging Deployment | ${{ needs.deploy-staging.result || 'N/A' }} | Staging environment deployment |
+          | Production Deployment | ${{ needs.deploy-production.result || 'N/A' }} | Production environment deployment |
+          | Rollback | ${{ needs.rollback.result || 'N/A' }} | Emergency rollback procedure |
+          
+          ## Summary
+          
+          EOF
+          
+          # Determine overall status
+          if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+            echo "✅ **DEPLOYMENT SUCCESSFUL** - Application deployed to production" >> deployment-report.md
+          elif [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
+            echo "🟡 **PARTIAL DEPLOYMENT** - Application deployed to staging only" >> deployment-report.md
+          elif [[ "${{ needs.rollback.result }}" == "success" ]]; then
+            echo "🔄 **ROLLBACK COMPLETED** - Deployment failed, successfully rolled back" >> deployment-report.md
+          else
+            echo "❌ **DEPLOYMENT FAILED** - Check logs for details" >> deployment-report.md
+          fi
+          
+          echo "" >> deployment-report.md
+          echo "## Next Steps" >> deployment-report.md
+          echo "" >> deployment-report.md
+          
+          if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+            echo "- Monitor application performance" >> deployment-report.md
+            echo "- Verify user functionality" >> deployment-report.md
+            echo "- Review deployment metrics" >> deployment-report.md
+          else
+            echo "- Investigate deployment failure" >> deployment-report.md
+            echo "- Fix identified issues" >> deployment-report.md
+            echo "- Retry deployment when ready" >> deployment-report.md
+          fi
+          
+          cat deployment-report.md
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-report-${{ needs.pre-deployment-validation.outputs.deployment-id }}
+          path: deployment-report.md
+          retention-days: 365

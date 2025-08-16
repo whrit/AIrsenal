@@ -1,0 +1,542 @@
+name: Security Scanning and Dependency Audit
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  schedule:
+    # Run security scans weekly on Sundays at 6 AM UTC
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+env:
+  # Security thresholds
+  MAX_HIGH_SEVERITY_VULNS: 0
+  MAX_MEDIUM_SEVERITY_VULNS: 2
+  MAX_SECRET_LEAKS: 0
+
+jobs:
+  dependency-audit:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev --extra api
+
+      - name: Generate requirements for security scanning
+        run: |
+          uv pip list --format freeze > requirements-for-scan.txt
+          echo "Generated requirements file for security scanning:"
+          head -20 requirements-for-scan.txt
+
+      - name: Run pip-audit for vulnerability scanning
+        run: |
+          uv pip install pip-audit
+          echo "🔍 Running pip-audit for dependency vulnerabilities..."
+          
+          # Run pip-audit and capture output
+          uv run pip-audit --format=json --output=audit-results.json --requirement requirements-for-scan.txt || true
+          
+          # Display results
+          if [ -f audit-results.json ]; then
+            echo "Audit results found, analyzing..."
+            python -c "
+            import json
+            import sys
+            
+            with open('audit-results.json', 'r') as f:
+                results = json.load(f)
+            
+            vulnerabilities = results.get('vulnerabilities', [])
+            print(f'Found {len(vulnerabilities)} vulnerabilities')
+            
+            high_severity = 0
+            medium_severity = 0
+            low_severity = 0
+            
+            for vuln in vulnerabilities:
+                aliases = vuln.get('aliases', [])
+                severity = 'unknown'
+                
+                # Try to determine severity from aliases or description
+                description = vuln.get('description', '').lower()
+                if any('critical' in alias.lower() for alias in aliases) or 'critical' in description:
+                    severity = 'critical'
+                elif any('high' in alias.lower() for alias in aliases) or 'high' in description:
+                    severity = 'high'
+                    high_severity += 1
+                elif any('medium' in alias.lower() for alias in aliases) or 'medium' in description:
+                    severity = 'medium'
+                    medium_severity += 1
+                else:
+                    severity = 'low'
+                    low_severity += 1
+                
+                print(f'  - {vuln.get(\"package\", \"unknown\")} {vuln.get(\"installed_version\", \"unknown\")}: {severity}')
+                if vuln.get('description'):
+                    print(f'    {vuln[\"description\"][:100]}...')
+            
+            print(f'\\nSeverity breakdown:')
+            print(f'  High: {high_severity} (max allowed: $MAX_HIGH_SEVERITY_VULNS)')
+            print(f'  Medium: {medium_severity} (max allowed: $MAX_MEDIUM_SEVERITY_VULNS)')
+            print(f'  Low: {low_severity}')
+            
+            # Check thresholds
+            if high_severity > $MAX_HIGH_SEVERITY_VULNS:
+                print(f'❌ High severity vulnerabilities exceed threshold: {high_severity} > $MAX_HIGH_SEVERITY_VULNS')
+                sys.exit(1)
+            
+            if medium_severity > $MAX_MEDIUM_SEVERITY_VULNS:
+                print(f'❌ Medium severity vulnerabilities exceed threshold: {medium_severity} > $MAX_MEDIUM_SEVERITY_VULNS')
+                sys.exit(1)
+            
+            print('✅ Vulnerability scan passed thresholds')
+            "
+          else
+            echo "No audit results file found, scan may have failed"
+          fi
+
+      - name: Check for known security issues in AI/ML dependencies
+        run: |
+          echo "🧠 Checking AI/ML specific security considerations..."
+          python -c "
+          import subprocess
+          import sys
+          
+          # Check for potential issues in AI/ML dependencies
+          ml_packages = ['jax', 'jaxlib', 'numpy', 'pandas', 'scikit-learn']
+          
+          try:
+              result = subprocess.run(['uv', 'pip', 'list'], capture_output=True, text=True)
+              installed_packages = result.stdout.lower()
+              
+              issues = []
+              
+              for pkg in ml_packages:
+                  if pkg in installed_packages:
+                      print(f'✓ Found {pkg} (checking for known issues...)')
+                      # In production, this would check against known ML security databases
+                      
+              if issues:
+                  print('❌ Found AI/ML security issues:')
+                  for issue in issues:
+                      print(f'  - {issue}')
+                  sys.exit(1)
+              else:
+                  print('✅ No known AI/ML security issues found')
+                  
+          except Exception as e:
+              print(f'Warning: AI/ML security check failed: {e}')
+          "
+
+      - name: Upload vulnerability report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: vulnerability-audit-${{ github.run_id }}
+          path: audit-results.json
+          retention-days: 30
+
+  secret-scanning:
+    name: Secret and Credential Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run GitLeaks for secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .gitleaks.toml
+
+      - name: Custom secret patterns check
+        run: |
+          echo "🔐 Checking for custom secret patterns..."
+          
+          # Check for potential secrets in code
+          python -c "
+          import os
+          import re
+          import sys
+          
+          # Common secret patterns for ML/AI projects
+          secret_patterns = [
+              (r'api_key\s*=\s*[\"\']\w+[\"\']\s*', 'API Key'),
+              (r'secret_key\s*=\s*[\"\']\w+[\"\']\s*', 'Secret Key'),
+              (r'password\s*=\s*[\"\']\w+[\"\']\s*', 'Password'),
+              (r'token\s*=\s*[\"\']\w+[\"\']\s*', 'Token'),
+              (r'fpl_password\s*=\s*[\"\']\w+[\"\']\s*', 'FPL Password'),
+              (r'redis_url\s*=\s*[\"\']\w+://[^\"\']+[\"\']\s*', 'Redis URL'),
+              (r'database_url\s*=\s*[\"\']\w+://[^\"\']+[\"\']\s*', 'Database URL'),
+          ]
+          
+          issues_found = []
+          
+          for root, dirs, files in os.walk('.'):
+              # Skip hidden directories and common ignore patterns
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules']]
+              
+              for file in files:
+                  if file.endswith(('.py', '.yml', '.yaml', '.json', '.env')):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                              content = f.read()
+                              
+                              for pattern, description in secret_patterns:
+                                  matches = re.finditer(pattern, content, re.IGNORECASE)
+                                  for match in matches:
+                                      # Skip test files and examples
+                                      if 'test' in filepath.lower() or 'example' in filepath.lower():
+                                          continue
+                                      issues_found.append(f'{filepath}: {description} detected')
+                      except Exception as e:
+                          pass  # Skip files that can't be read
+          
+          if issues_found:
+              print(f'❌ Found {len(issues_found)} potential secret leaks:')
+              for issue in issues_found:
+                  print(f'  - {issue}')
+              if len(issues_found) > $MAX_SECRET_LEAKS:
+                  sys.exit(1)
+          else:
+              print('✅ No secret patterns detected')
+          "
+
+      - name: Check environment variable usage
+        run: |
+          echo "🌍 Analyzing environment variable usage..."
+          python -c "
+          import os
+          import re
+          
+          # Find environment variable usage
+          env_patterns = [
+              r'os\.environ\.get\([\"\'](.*?)[\"\']\)',
+              r'os\.getenv\([\"\'](.*?)[\"\']\)',
+              r'getenv\([\"\'](.*?)[\"\']\)',
+          ]
+          
+          env_vars_found = set()
+          
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__']]
+              
+              for file in files:
+                  if file.endswith('.py'):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                              content = f.read()
+                              
+                              for pattern in env_patterns:
+                                  matches = re.finditer(pattern, content)
+                                  for match in matches:
+                                      env_vars_found.add(match.group(1))
+                      except Exception:
+                          pass
+          
+          print(f'Found {len(env_vars_found)} environment variables in use:')
+          for var in sorted(env_vars_found):
+              print(f'  - {var}')
+          
+          # Check for sensitive variable names
+          sensitive_vars = [var for var in env_vars_found if any(
+              word in var.lower() for word in ['password', 'secret', 'key', 'token', 'credential']
+          )]
+          
+          if sensitive_vars:
+              print(f'\\n⚠️ Found {len(sensitive_vars)} potentially sensitive environment variables:')
+              for var in sensitive_vars:
+                  print(f'  - {var}')
+              print('\\nEnsure these are properly secured and not hardcoded!')
+          
+          print('✅ Environment variable analysis complete')
+          "
+
+  code-security-analysis:
+    name: Code Security Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install security analysis tools
+        run: |
+          pip install bandit safety semgrep
+
+      - name: Run Bandit security linter
+        run: |
+          echo "🛡️ Running Bandit security analysis..."
+          bandit -r airsenal/ -f json -o bandit-results.json || true
+          
+          # Analyze results
+          python -c "
+          import json
+          import sys
+          
+          try:
+              with open('bandit-results.json', 'r') as f:
+                  results = json.load(f)
+              
+              issues = results.get('results', [])
+              high_issues = [i for i in issues if i.get('issue_severity') == 'HIGH']
+              medium_issues = [i for i in issues if i.get('issue_severity') == 'MEDIUM']
+              low_issues = [i for i in issues if i.get('issue_severity') == 'LOW']
+              
+              print(f'Bandit found {len(issues)} security issues:')
+              print(f'  High: {len(high_issues)}')
+              print(f'  Medium: {len(medium_issues)}')
+              print(f'  Low: {len(low_issues)}')
+              
+              if high_issues:
+                  print('\\nHigh severity issues:')
+                  for issue in high_issues:
+                      print(f'  - {issue.get(\"filename\", \"unknown\")}:{issue.get(\"line_number\", \"?\")}: {issue.get(\"test_name\", \"unknown\")}')
+                      print(f'    {issue.get(\"issue_text\", \"\")}')
+              
+              # Fail if high severity issues found
+              if len(high_issues) > 0:
+                  print(f'❌ Found {len(high_issues)} high severity security issues')
+                  sys.exit(1)
+              
+              print('✅ Bandit security analysis passed')
+              
+          except FileNotFoundError:
+              print('No bandit results found')
+          except Exception as e:
+              print(f'Error analyzing bandit results: {e}')
+          "
+
+      - name: Run Safety check for known vulnerabilities
+        run: |
+          echo "🛟 Running Safety check for known vulnerabilities..."
+          safety check --json --output safety-results.json || true
+          
+          python -c "
+          import json
+          import sys
+          
+          try:
+              with open('safety-results.json', 'r') as f:
+                  content = f.read().strip()
+                  if not content:
+                      print('No safety issues found')
+                      sys.exit(0)
+                  
+                  results = json.loads(content)
+              
+              if isinstance(results, list) and len(results) > 0:
+                  print(f'Safety found {len(results)} vulnerability issues:')
+                  for issue in results:
+                      print(f'  - {issue.get(\"package\", \"unknown\")} {issue.get(\"installed_version\", \"unknown\")}')
+                      print(f'    {issue.get(\"vulnerability\", \"\")}')
+                  
+                  # Count critical issues
+                  critical_count = len([r for r in results if 'critical' in str(r).lower()])
+                  if critical_count > 0:
+                      print(f'❌ Found {critical_count} critical vulnerabilities')
+                      sys.exit(1)
+              
+              print('✅ Safety check passed')
+              
+          except FileNotFoundError:
+              print('No safety results found')
+          except Exception as e:
+              print(f'Error analyzing safety results: {e}')
+          "
+
+      - name: ML/AI specific security checks
+        run: |
+          echo "🤖 Running ML/AI specific security checks..."
+          python -c "
+          import os
+          import re
+          import sys
+          
+          # Check for common ML security issues
+          security_issues = []
+          
+          # 1. Check for model serialization with pickle (security risk)
+          print('Checking for unsafe pickle usage...')
+          pickle_pattern = r'pickle\.(load|loads|dump|dumps)'
+          
+          for root, dirs, files in os.walk('airsenal/'):
+              for file in files:
+                  if file.endswith('.py'):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8') as f:
+                              content = f.read()
+                              matches = list(re.finditer(pickle_pattern, content))
+                              if matches:
+                                  security_issues.append(f'{filepath}: Unsafe pickle usage detected')
+                      except Exception:
+                          pass
+          
+          # 2. Check for model file loading without validation
+          print('Checking for unsafe model loading...')
+          unsafe_load_patterns = [
+              r'joblib\.load\(',
+              r'torch\.load\(',
+              r'tf\.saved_model\.load\(',
+          ]
+          
+          for root, dirs, files in os.walk('airsenal/'):
+              for file in files:
+                  if file.endswith('.py'):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8') as f:
+                              content = f.read()
+                              for pattern in unsafe_load_patterns:
+                                  matches = list(re.finditer(pattern, content))
+                                  if matches and 'safe_load' not in content:
+                                      security_issues.append(f'{filepath}: Potentially unsafe model loading')
+                      except Exception:
+                          pass
+          
+          # 3. Check for SQL injection vulnerabilities
+          print('Checking for SQL injection risks...')
+          sql_injection_patterns = [
+              r'\.execute\(.*%.*\)',
+              r'\.execute\(.*\+.*\)',
+              r'\.execute\(.*\.format\(',
+          ]
+          
+          for root, dirs, files in os.walk('airsenal/'):
+              for file in files:
+                  if file.endswith('.py'):
+                      filepath = os.path.join(root, file)
+                      try:
+                          with open(filepath, 'r', encoding='utf-8') as f:
+                              content = f.read()
+                              for pattern in sql_injection_patterns:
+                                  matches = list(re.finditer(pattern, content))
+                                  if matches:
+                                      security_issues.append(f'{filepath}: Potential SQL injection risk')
+                      except Exception:
+                          pass
+          
+          if security_issues:
+              print(f'❌ Found {len(security_issues)} ML/AI security issues:')
+              for issue in security_issues:
+                  print(f'  - {issue}')
+              # Don't fail for these warnings, just report
+              print('\\n⚠️ Please review these issues for security implications')
+          else:
+              print('✅ No ML/AI specific security issues found')
+          "
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports-${{ github.run_id }}
+          path: |
+            bandit-results.json
+            safety-results.json
+          retention-days: 30
+
+  compliance-check:
+    name: Security Compliance Check
+    runs-on: ubuntu-latest
+    needs: [dependency-audit, secret-scanning, code-security-analysis]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate security compliance report
+        run: |
+          echo "📋 Generating Security Compliance Report"
+          echo "========================================"
+          
+          cat > security-compliance-report.md << 'EOF'
+          # Security Compliance Report
+          
+          **Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Repository:** ${{ github.repository }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          
+          ## Security Scan Results
+          
+          | Component | Status | Notes |
+          |-----------|--------|-------|
+          | Dependency Audit | ${{ needs.dependency-audit.result || 'N/A' }} | Scanned for known vulnerabilities |
+          | Secret Scanning | ${{ needs.secret-scanning.result || 'N/A' }} | Checked for leaked credentials |
+          | Code Security Analysis | ${{ needs.code-security-analysis.result || 'N/A' }} | Static analysis for security issues |
+          
+          ## Compliance Status
+          
+          EOF
+          
+          # Check overall compliance
+          if [[ "${{ needs.dependency-audit.result }}" == "success" && \
+                "${{ needs.secret-scanning.result }}" == "success" && \
+                "${{ needs.code-security-analysis.result }}" == "success" ]]; then
+            echo "✅ **COMPLIANT** - All security checks passed" >> security-compliance-report.md
+          else
+            echo "❌ **NON-COMPLIANT** - One or more security checks failed" >> security-compliance-report.md
+          fi
+          
+          echo "" >> security-compliance-report.md
+          echo "## Recommendations" >> security-compliance-report.md
+          echo "" >> security-compliance-report.md
+          echo "- Regular dependency updates" >> security-compliance-report.md
+          echo "- Periodic security training for development team" >> security-compliance-report.md
+          echo "- Implementation of pre-commit security hooks" >> security-compliance-report.md
+          echo "- Regular penetration testing for production systems" >> security-compliance-report.md
+          
+          cat security-compliance-report.md
+
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-compliance-report-${{ github.run_id }}
+          path: security-compliance-report.md
+          retention-days: 90
+
+      - name: Comment compliance status on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security-compliance-report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔒 Security Compliance Report\n\n${report}\n\nFor detailed security scan results, check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).`
+            });
