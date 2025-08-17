@@ -354,6 +354,8 @@ class PlayerScore(Base):
     own_goals: Mapped[int | None]
     penalties_saved: Mapped[int | None]
     penalties_missed: Mapped[int | None]
+    penalties_taken: Mapped[int | None] = mapped_column(comment="Number of penalties taken by player")
+    penalties_scored: Mapped[int | None] = mapped_column(comment="Number of penalties scored by player")
     yellow_cards: Mapped[int | None]
     red_cards: Mapped[int | None]
     saves: Mapped[int | None]
@@ -827,6 +829,447 @@ class SchemaCompatibility(Base):
 
     def __str__(self):
         return f"SchemaCompatibility(app:{self.app_version_min}-{self.app_version_max}, schema:{self.schema_version_min}-{self.schema_version_max}, level:{self.compatibility_level})"
+
+
+class TeamStrength(Base):
+    """Store current team strength ratings using Bayesian modeling"""
+    __tablename__ = "team_strength"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    team: Mapped[str100]
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    
+    # Core strength ratings with uncertainty
+    attacking_strength_home: Mapped[float] = mapped_column(comment="Home attacking strength (posterior mean)")
+    attacking_strength_away: Mapped[float] = mapped_column(comment="Away attacking strength (posterior mean)")
+    defensive_strength_home: Mapped[float] = mapped_column(comment="Home defensive strength (posterior mean)")
+    defensive_strength_away: Mapped[float] = mapped_column(comment="Away defensive strength (posterior mean)")
+    
+    # Uncertainty quantification (standard deviations of posterior)
+    attacking_strength_home_std: Mapped[float] = mapped_column(comment="Standard deviation of home attacking strength")
+    attacking_strength_away_std: Mapped[float] = mapped_column(comment="Standard deviation of away attacking strength")
+    defensive_strength_home_std: Mapped[float] = mapped_column(comment="Standard deviation of home defensive strength")
+    defensive_strength_away_std: Mapped[float] = mapped_column(comment="Standard deviation of away defensive strength")
+    
+    # Overall strength composites
+    overall_strength_home: Mapped[float] = mapped_column(comment="Combined home strength rating")
+    overall_strength_away: Mapped[float] = mapped_column(comment="Combined away strength rating")
+    
+    # Component metrics contributing to strength
+    expected_goals_for_per_game: Mapped[float] = mapped_column(comment="Expected goals scored per game")
+    expected_goals_against_per_game: Mapped[float] = mapped_column(comment="Expected goals conceded per game")
+    actual_goals_for_per_game: Mapped[float] = mapped_column(comment="Actual goals scored per game")
+    actual_goals_against_per_game: Mapped[float] = mapped_column(comment="Actual goals conceded per game")
+    shots_for_per_game: Mapped[float] = mapped_column(comment="Shots taken per game")
+    shots_against_per_game: Mapped[float] = mapped_column(comment="Shots conceded per game")
+    clean_sheet_probability: Mapped[float] = mapped_column(comment="Probability of keeping clean sheet")
+    
+    # Form indicators
+    form_weighted_strength: Mapped[float] = mapped_column(comment="Form-adjusted strength rating")
+    recent_performance_trend: Mapped[float] = mapped_column(comment="Recent performance trend (-1 to 1)")
+    momentum_factor: Mapped[float] = mapped_column(comment="Team momentum factor")
+    
+    # Bayesian model metadata
+    model_version: Mapped[str100] = mapped_column(default="1.0.0", comment="Version of Bayesian model used")
+    sample_count: Mapped[int] = mapped_column(comment="Number of MCMC samples used")
+    convergence_diagnostic: Mapped[float] = mapped_column(comment="R-hat convergence diagnostic")
+    effective_sample_size: Mapped[int] = mapped_column(comment="Effective sample size")
+    
+    # Data quality and context
+    matches_played: Mapped[int] = mapped_column(comment="Number of matches in calculation")
+    home_matches_played: Mapped[int] = mapped_column(comment="Home matches played")
+    away_matches_played: Mapped[int] = mapped_column(comment="Away matches played")
+    data_quality_score: Mapped[float] = mapped_column(comment="Quality of underlying data (0-1)")
+    
+    # External factors
+    manager_change_adjustment: Mapped[float | None] = mapped_column(comment="Adjustment for recent manager changes")
+    key_player_injury_impact: Mapped[float | None] = mapped_column(comment="Impact of key player injuries")
+    transfer_window_impact: Mapped[float | None] = mapped_column(comment="Impact of recent transfers")
+    
+    # Timestamp
+    calculated_at: Mapped[str100] = mapped_column(comment="ISO datetime when strength was calculated")
+    expires_at: Mapped[str100 | None] = mapped_column(comment="When this strength rating expires")
+    
+    # Define indexes for efficient querying
+    __table_args__ = (
+        # Primary lookup patterns
+        Index("ix_team_strength_team_season", "team", "season", "gameweek"),
+        Index("ix_team_strength_current", "team", "season", "gameweek"),
+        
+        # Strength-based queries
+        Index("ix_team_strength_attacking_home", "attacking_strength_home"),
+        Index("ix_team_strength_defensive_home", "defensive_strength_home"),
+        Index("ix_team_strength_overall", "overall_strength_home", "overall_strength_away"),
+        
+        # Form and trend queries
+        Index("ix_team_strength_form", "form_weighted_strength"),
+        Index("ix_team_strength_momentum", "momentum_factor"),
+        
+        # Data quality filtering
+        Index("ix_team_strength_quality", "data_quality_score"),
+        
+        # Time-based queries
+        Index("ix_team_strength_calculated_at", "calculated_at"),
+    )
+    
+    def __str__(self):
+        return f"TeamStrength({self.team} {self.season} GW{self.gameweek}: H{self.overall_strength_home:.2f}/A{self.overall_strength_away:.2f})"
+
+
+class TeamStrengthHistory(Base):
+    """Historical team strength ratings for trend analysis and validation"""
+    __tablename__ = "team_strength_history"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    team: Mapped[str100]
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    
+    # Historical strength values
+    attacking_strength_home: Mapped[float]
+    attacking_strength_away: Mapped[float] 
+    defensive_strength_home: Mapped[float]
+    defensive_strength_away: Mapped[float]
+    overall_strength_home: Mapped[float]
+    overall_strength_away: Mapped[float]
+    
+    # Change from previous measurement
+    attacking_strength_home_change: Mapped[float | None] = mapped_column(comment="Change from previous gameweek")
+    attacking_strength_away_change: Mapped[float | None] = mapped_column(comment="Change from previous gameweek")
+    defensive_strength_home_change: Mapped[float | None] = mapped_column(comment="Change from previous gameweek")
+    defensive_strength_away_change: Mapped[float | None] = mapped_column(comment="Change from previous gameweek")
+    
+    # Performance validation
+    actual_result: Mapped[str100 | None] = mapped_column(comment="Actual match result if applicable")
+    predicted_result: Mapped[str100 | None] = mapped_column(comment="Predicted result based on strength")
+    prediction_accuracy: Mapped[float | None] = mapped_column(comment="Accuracy of strength-based prediction")
+    
+    # Context information
+    matches_used_in_calculation: Mapped[int] = mapped_column(comment="Number of matches used for calculation")
+    exponential_smoothing_alpha: Mapped[float] = mapped_column(comment="Alpha parameter used in exponential smoothing")
+    
+    # Calculation metadata
+    calculation_trigger: Mapped[str100] = mapped_column(comment="What triggered this calculation")
+    calculation_duration_ms: Mapped[int | None] = mapped_column(comment="Time taken to calculate")
+    
+    # Timestamp
+    calculated_at: Mapped[str100] = mapped_column(comment="ISO datetime when calculated")
+    
+    # Define indexes for historical analysis
+    __table_args__ = (
+        # Time series queries
+        Index("ix_team_strength_history_team_time", "team", "season", "gameweek"),
+        Index("ix_team_strength_history_calculated_at", "calculated_at"),
+        
+        # Validation queries
+        Index("ix_team_strength_history_validation", "prediction_accuracy"),
+        Index("ix_team_strength_history_results", "actual_result", "predicted_result"),
+        
+        # Change analysis
+        Index("ix_team_strength_history_changes", "attacking_strength_home_change", "defensive_strength_home_change"),
+    )
+    
+    def __str__(self):
+        return f"TeamStrengthHistory({self.team} {self.season} GW{self.gameweek} calculated at {self.calculated_at})"
+
+
+class FixtureDifficulty(Base):
+    """Store comprehensive fixture difficulty ratings and component breakdowns."""
+    __tablename__ = "fixture_difficulty"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    fixture_id: Mapped[int] = mapped_column(ForeignKey("fixture.fixture_id"))
+    fixture: Mapped["Fixture"] = relationship()
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    
+    # Core difficulty ratings (1-5 scale)
+    home_difficulty: Mapped[float] = mapped_column(comment="Home team difficulty rating (1=easiest, 5=hardest)")
+    away_difficulty: Mapped[float] = mapped_column(comment="Away team difficulty rating (1=easiest, 5=hardest)")
+    
+    # Expected win probabilities (0-1 scale)
+    home_expected_score: Mapped[float] = mapped_column(comment="Home team expected win probability")
+    away_expected_score: Mapped[float] = mapped_column(comment="Away team expected win probability")
+    
+    # Component ratings - Elo system
+    home_elo_rating: Mapped[float] = mapped_column(comment="Home team Elo rating at time of calculation")
+    away_elo_rating: Mapped[float] = mapped_column(comment="Away team Elo rating at time of calculation")
+    elo_home_advantage: Mapped[float] = mapped_column(comment="Home advantage in Elo points")
+    
+    # Component ratings - Form analysis
+    home_form_score: Mapped[float] = mapped_column(comment="Home team recent form score (0-1 scale)")
+    away_form_score: Mapped[float] = mapped_column(comment="Away team recent form score (0-1 scale)")
+    form_adjustment: Mapped[float] = mapped_column(comment="Form-based adjustment to expected score")
+    
+    # Component ratings - Fixture congestion
+    home_congestion_factor: Mapped[float] = mapped_column(comment="Home team fixture congestion factor (-1 to 1)")
+    away_congestion_factor: Mapped[float] = mapped_column(comment="Away team fixture congestion factor (-1 to 1)")
+    congestion_adjustment: Mapped[float] = mapped_column(comment="Congestion-based adjustment to expected score")
+    
+    # Component ratings - Head-to-head
+    h2h_home_advantage: Mapped[float] = mapped_column(comment="Historical home advantage for this matchup")
+    h2h_recent_performance: Mapped[float] = mapped_column(comment="Recent H2H performance of home team")
+    h2h_matches_analyzed: Mapped[int] = mapped_column(comment="Number of H2H matches analyzed")
+    h2h_adjustment: Mapped[float] = mapped_column(comment="H2H-based adjustment to expected score")
+    
+    # Calculation metadata
+    calculation_method: Mapped[str100] = mapped_column(default="elo_comprehensive", comment="Method used for calculation")
+    calculation_version: Mapped[str100] = mapped_column(default="1.0.0", comment="Version of calculation algorithm")
+    calculated_at: Mapped[str100] = mapped_column(comment="ISO datetime when difficulty was calculated")
+    data_quality_score: Mapped[float | None] = mapped_column(comment="Quality score of underlying data (0-1 scale)")
+    
+    # Validation tracking
+    actual_result: Mapped[str100 | None] = mapped_column(comment="Actual match result (H/A/D) for validation")
+    prediction_accuracy: Mapped[float | None] = mapped_column(comment="Accuracy of prediction vs actual result")
+    validation_date: Mapped[str100 | None] = mapped_column(comment="Date when validation was performed")
+    
+    # Define indexes for efficient querying
+    __table_args__ = (
+        # Primary query patterns
+        Index("ix_fixture_difficulty_fixture_season", "fixture_id", "season"),
+        Index("ix_fixture_difficulty_gameweek", "gameweek", "season"),
+        
+        # Team-based queries
+        Index("ix_fixture_difficulty_home_team", "season", "gameweek"),
+        Index("ix_fixture_difficulty_away_team", "season", "gameweek"),
+        
+        # Difficulty-based filtering
+        Index("ix_fixture_difficulty_home_rating", "home_difficulty"),
+        Index("ix_fixture_difficulty_away_rating", "away_difficulty"),
+        
+        # Validation queries
+        Index("ix_fixture_difficulty_validation", "actual_result", "prediction_accuracy"),
+        
+        # Time-based queries
+        Index("ix_fixture_difficulty_calculated_at", "calculated_at"),
+    )
+    
+    def __str__(self):
+        return f"FixtureDifficulty(GW{self.gameweek} {self.season}: Home={self.home_difficulty:.1f}, Away={self.away_difficulty:.1f})"
+
+
+class PenaltyTakerHistory(Base):
+    """Track penalty taker assignments and changes over time for audit and analysis."""
+    __tablename__ = "penalty_taker_history"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("player.player_id"))
+    player: Mapped["Player"] = relationship(foreign_keys=[player_id])
+    team: Mapped[str100]
+    season: Mapped[str100]
+    gameweek: Mapped[int | None]  # Can be null for season-level assignments
+    
+    # Assignment details
+    is_primary_taker: Mapped[bool] = mapped_column(default=False, comment="Whether player is primary penalty taker")
+    confidence_score: Mapped[float] = mapped_column(comment="Confidence score for this assignment (0-1 scale)")
+    assignment_source: Mapped[str100]  # "analysis", "attributes", "manual", "external"
+    
+    # Historical penalty data at time of assignment
+    penalties_taken_total: Mapped[int] = mapped_column(default=0, comment="Total penalties taken by player at assignment time")
+    penalties_scored_total: Mapped[int] = mapped_column(default=0, comment="Total penalties scored by player at assignment time")
+    success_rate: Mapped[float | None] = mapped_column(comment="Penalty conversion rate at assignment time")
+    
+    # Change tracking
+    assignment_date: Mapped[str100]  # ISO datetime string when assignment was made
+    changed_from_player_id: Mapped[int | None] = mapped_column(ForeignKey("player.player_id"), comment="Previous penalty taker if this is a change")
+    change_reason: Mapped[str | None] = mapped_column(String(500), comment="Reason for penalty taker change")
+    
+    # Validation and performance tracking
+    is_active: Mapped[bool] = mapped_column(default=True, comment="Whether this assignment is currently active")
+    validated_by_actual_penalty: Mapped[bool] = mapped_column(default=False, comment="Whether assignment was validated by actual penalty event")
+    validation_date: Mapped[str100 | None]  # ISO datetime when validation occurred
+    
+    # Analysis metadata
+    analysis_version: Mapped[str100] = mapped_column(default="1.0.0", comment="Version of analysis algorithm used")
+    data_quality_score: Mapped[float | None] = mapped_column(comment="Quality score of underlying data (0-1 scale)")
+    
+    def __str__(self):
+        primary_str = "Primary" if self.is_primary_taker else "Secondary"
+        return f"PenaltyTakerHistory({primary_str} {self.player.name} for {self.team} {self.season}, confidence={self.confidence_score:.2f})"
+
+
+class RotationRiskPrediction(Base):
+    """Store rotation risk predictions for players with detailed factor breakdown."""
+    __tablename__ = "rotation_risk_prediction"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("player.player_id"))
+    player: Mapped["Player"] = relationship()
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    
+    # Core prediction
+    rotation_risk: Mapped[float] = mapped_column(comment="Overall rotation risk score (0-1 scale)")
+    confidence: Mapped[float] = mapped_column(comment="Prediction confidence (0-1 scale)")
+    model_version: Mapped[str100] = mapped_column(comment="Version of prediction model used")
+    
+    # Individual risk factors
+    fixture_congestion: Mapped[float] = mapped_column(comment="Fixture congestion factor (0-1)")
+    fatigue_risk: Mapped[float] = mapped_column(comment="Player fatigue risk from recent minutes (0-1)")
+    age_factor: Mapped[float] = mapped_column(comment="Age-related rotation tendency (0-1)")
+    manager_rotation_tendency: Mapped[float] = mapped_column(comment="Manager's general rotation rate (0-1)")
+    position_rotation_rate: Mapped[float] = mapped_column(comment="Position-specific rotation rate (0-1)")
+    player_importance: Mapped[float] = mapped_column(comment="Player importance to team (0-1, higher = more important)")
+    competition_importance: Mapped[float] = mapped_column(comment="Importance of upcoming competition (0-1)")
+    team_depth: Mapped[float] = mapped_column(comment="Team depth in player's position (0-1)")
+    recovery_time: Mapped[float] = mapped_column(comment="Recovery time factor (0-1)")
+    
+    # Prediction metadata
+    predicted_at: Mapped[str100] = mapped_column(comment="ISO datetime when prediction was made")
+    data_quality_score: Mapped[float | None] = mapped_column(comment="Quality of underlying data (0-1)")
+    calculation_method: Mapped[str100] = mapped_column(default="ml_ensemble", comment="Method used for calculation")
+    
+    # Validation tracking
+    actual_outcome: Mapped[bool | None] = mapped_column(comment="Actual rotation outcome if known (True=rotated, False=started)")
+    prediction_accuracy: Mapped[float | None] = mapped_column(comment="Accuracy of this prediction if validated")
+    validated_at: Mapped[str100 | None] = mapped_column(comment="ISO datetime when outcome was validated")
+    
+    # Define indexes for efficient querying
+    __table_args__ = (
+        # Primary lookup patterns
+        Index("ix_rotation_risk_player_gameweek", "player_id", "season", "gameweek"),
+        Index("ix_rotation_risk_gameweek", "gameweek", "season"),
+        
+        # Risk-based filtering
+        Index("ix_rotation_risk_score", "rotation_risk"),
+        Index("ix_rotation_risk_high_risk", "rotation_risk", "confidence"),
+        
+        # Factor analysis
+        Index("ix_rotation_risk_fatigue", "fatigue_risk"),
+        Index("ix_rotation_risk_congestion", "fixture_congestion"),
+        
+        # Time-based queries
+        Index("ix_rotation_risk_predicted_at", "predicted_at"),
+        
+        # Validation queries
+        Index("ix_rotation_risk_validation", "actual_outcome", "prediction_accuracy"),
+    )
+    
+    def __str__(self):
+        return f"RotationRisk({self.player.name} GW{self.gameweek}: {self.rotation_risk:.2f} risk, {self.confidence:.2f} confidence)"
+
+
+class ManagerRotationPattern(Base):
+    """Store manager-specific rotation patterns and behaviors."""
+    __tablename__ = "manager_rotation_pattern"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    team: Mapped[str100]
+    season: Mapped[str100]
+    manager_name: Mapped[str100 | None] = mapped_column(comment="Manager name if known")
+    
+    # Overall rotation metrics
+    avg_rotation_rate: Mapped[float] = mapped_column(comment="Overall rotation frequency (0-1)")
+    congestion_response: Mapped[float] = mapped_column(comment="Increased rotation during fixture congestion (0-2)")
+    sample_size: Mapped[int] = mapped_column(comment="Number of fixtures analyzed")
+    
+    # Position-specific rotation rates
+    gk_rotation_rate: Mapped[float] = mapped_column(comment="Goalkeeper rotation rate")
+    def_rotation_rate: Mapped[float] = mapped_column(comment="Defender rotation rate")
+    mid_rotation_rate: Mapped[float] = mapped_column(comment="Midfielder rotation rate")
+    fwd_rotation_rate: Mapped[float] = mapped_column(comment="Forward rotation rate")
+    
+    # Competition preferences (team selection strength by competition)
+    premier_league_priority: Mapped[float] = mapped_column(default=1.0, comment="Premier League team strength priority")
+    champions_league_priority: Mapped[float] = mapped_column(default=0.9, comment="Champions League team strength priority")
+    europa_league_priority: Mapped[float] = mapped_column(default=0.8, comment="Europa League team strength priority")
+    fa_cup_priority: Mapped[float] = mapped_column(default=0.6, comment="FA Cup team strength priority")
+    carabao_cup_priority: Mapped[float] = mapped_column(default=0.4, comment="Carabao Cup team strength priority")
+    
+    # Behavioral indicators
+    age_bias: Mapped[float] = mapped_column(default=0.0, comment="Tendency to rotate older players (-1 to 1)")
+    youth_integration: Mapped[float] = mapped_column(default=0.0, comment="Tendency to give young players chances (0-1)")
+    injury_caution: Mapped[float] = mapped_column(default=0.5, comment="Caution level with injury-prone players (0-1)")
+    
+    # Analysis metadata
+    analysis_version: Mapped[str100] = mapped_column(default="1.0.0", comment="Version of analysis algorithm")
+    analyzed_at: Mapped[str100] = mapped_column(comment="ISO datetime when analysis was performed")
+    data_quality_score: Mapped[float] = mapped_column(comment="Quality of underlying data (0-1)")
+    
+    # Validation metrics
+    prediction_accuracy: Mapped[float | None] = mapped_column(comment="Accuracy when using these patterns for prediction")
+    validation_period: Mapped[str100 | None] = mapped_column(comment="Period used for validation")
+    
+    # Define indexes for manager analysis
+    __table_args__ = (
+        # Primary lookup patterns
+        Index("ix_manager_pattern_team_season", "team", "season"),
+        Index("ix_manager_pattern_manager", "manager_name", "season"),
+        
+        # Rotation rate queries
+        Index("ix_manager_pattern_rotation_rate", "avg_rotation_rate"),
+        Index("ix_manager_pattern_congestion_response", "congestion_response"),
+        
+        # Position-specific queries
+        Index("ix_manager_pattern_position_rates", "def_rotation_rate", "mid_rotation_rate", "fwd_rotation_rate"),
+        
+        # Time-based queries
+        Index("ix_manager_pattern_analyzed_at", "analyzed_at"),
+    )
+    
+    def __str__(self):
+        manager_str = self.manager_name or "Unknown Manager"
+        return f"ManagerPattern({manager_str} - {self.team} {self.season}: {self.avg_rotation_rate:.2f} avg rotation)"
+
+
+class FixtureCongestion(Base):
+    """Store fixture congestion analysis for teams and gameweeks."""
+    __tablename__ = "fixture_congestion"
+    
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    team: Mapped[str100]
+    season: Mapped[str100]
+    gameweek: Mapped[int]
+    
+    # Core congestion metrics
+    congestion_score: Mapped[float] = mapped_column(comment="Overall congestion level (0-1)")
+    fixtures_7_days: Mapped[int] = mapped_column(comment="Number of fixtures in 7-day window")
+    fixtures_14_days: Mapped[int] = mapped_column(comment="Number of fixtures in 14-day window")
+    travel_burden: Mapped[float] = mapped_column(comment="Travel-adjusted fixture load")
+    recovery_time: Mapped[float] = mapped_column(comment="Days since last fixture")
+    
+    # Upcoming fixture details
+    next_fixture_days: Mapped[int | None] = mapped_column(comment="Days until next fixture")
+    next_fixture_competition: Mapped[str100 | None] = mapped_column(comment="Type of next fixture competition")
+    next_fixture_is_away: Mapped[bool | None] = mapped_column(comment="Whether next fixture is away")
+    
+    # Historical context
+    season_fixture_load: Mapped[float] = mapped_column(comment="Season-to-date fixture load compared to typical")
+    congestion_rank: Mapped[int | None] = mapped_column(comment="Congestion rank among all teams this gameweek")
+    
+    # Impact factors
+    european_competition: Mapped[bool] = mapped_column(default=False, comment="Whether team is in European competition")
+    international_break_impact: Mapped[float] = mapped_column(default=0.0, comment="Impact of recent international break")
+    injury_crisis_multiplier: Mapped[float] = mapped_column(default=1.0, comment="Multiplier for injury-related squad limitations")
+    
+    # Calculation metadata
+    calculated_at: Mapped[str100] = mapped_column(comment="ISO datetime when calculated")
+    calculation_version: Mapped[str100] = mapped_column(default="1.0.0", comment="Version of calculation algorithm")
+    data_quality_score: Mapped[float] = mapped_column(comment="Quality of underlying fixture data (0-1)")
+    
+    # Define indexes for congestion analysis
+    __table_args__ = (
+        # Primary lookup patterns
+        Index("ix_fixture_congestion_team_gameweek", "team", "season", "gameweek"),
+        Index("ix_fixture_congestion_gameweek", "gameweek", "season"),
+        
+        # Congestion-based queries
+        Index("ix_fixture_congestion_score", "congestion_score"),
+        Index("ix_fixture_congestion_high", "congestion_score", "team"),
+        
+        # Recovery time analysis
+        Index("ix_fixture_congestion_recovery", "recovery_time"),
+        
+        # Competition impact
+        Index("ix_fixture_congestion_european", "european_competition", "congestion_score"),
+        
+        # Time-based queries
+        Index("ix_fixture_congestion_calculated_at", "calculated_at"),
+    )
+    
+    def __str__(self):
+        return f"FixtureCongestion({self.team} GW{self.gameweek}: {self.congestion_score:.2f} score, {self.fixtures_7_days} fixtures in 7 days)"
 
 
 def get_connection_string() -> str:

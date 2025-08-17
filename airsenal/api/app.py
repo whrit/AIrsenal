@@ -16,17 +16,36 @@ from airsenal.framework.api_utils import (
     add_session_player,
     best_transfer_suggestions,
     combine_player_info,
+    compare_team_strengths_for_api,
     create_response,
     fill_session_squad,
+    get_all_penalty_takers_for_api,
+    get_all_team_strengths_for_api,
+    get_all_teams_fixture_difficulties_for_api,
+    get_fixture_congestion_for_api,
+    get_fixture_difficulty_for_api,
+    get_gameweek_fixture_difficulties_for_api,
+    get_high_rotation_risk_players_for_api,
+    get_manager_rotation_patterns_for_api,
+    get_penalty_taker_confidence,
+    get_penalty_takers_for_team,
+    get_rotation_risk_for_player_api,
     get_session_budget,
     get_session_players,
     get_session_predictions,
+    get_team_fixture_difficulties_for_api,
+    get_team_rotation_risks_for_api,
+    get_team_strength_for_api,
+    get_team_strength_trends_for_api,
     list_players_for_api,
     list_teams_for_api,
     remove_db_session,
     remove_session_player,
     set_session_budget,
+    update_team_strengths_for_api,
+    validate_fixture_difficulty_predictions_for_api,
     validate_session_squad,
+    validate_team_strength_model_for_api,
 )
 
 
@@ -190,6 +209,510 @@ def session_budget():
     budget = data["budget"]
     set_session_budget(budget, get_session_id())
     return create_response("OK")
+
+
+@blueprint.route("/penalty_takers", methods=["GET"])
+def get_all_penalty_takers():
+    """
+    Get penalty takers for all teams in the current season.
+    
+    Returns:
+        Dictionary mapping team names to their penalty takers with confidence scores
+    """
+    penalty_takers = get_all_penalty_takers_for_api()
+    return create_response(penalty_takers)
+
+
+@blueprint.route("/penalty_takers/<team>", methods=["GET"])
+def get_team_penalty_takers(team):
+    """
+    Get penalty takers for a specific team.
+    
+    Args:
+        team: Team name (3-letter code or full name)
+        
+    Returns:
+        List of penalty taker assignments for the team
+    """
+    season = request.args.get('season')  # Optional season parameter
+    penalty_takers = get_penalty_takers_for_team(team, season)
+    return create_response(penalty_takers)
+
+
+@blueprint.route("/player/<player_id>/penalty_info", methods=["GET"])
+def get_player_penalty_info(player_id):
+    """
+    Get penalty taker information for a specific player.
+    
+    Args:
+        player_id: Player ID
+        
+    Returns:
+        Dictionary with penalty taker confidence and statistics
+    """
+    season = request.args.get('season')  # Optional season parameter
+    penalty_info = get_penalty_taker_confidence(int(player_id), season)
+    return create_response(penalty_info)
+
+
+@blueprint.route("/fixture/<fixture_id>/difficulty", methods=["GET"])
+def get_fixture_difficulty(fixture_id):
+    """
+    Get fixture difficulty rating for a specific fixture.
+    
+    Args:
+        fixture_id: Fixture ID
+        
+    Query parameters:
+        team: Calculate difficulty from this team's perspective (optional)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with fixture difficulty rating and component breakdown
+    """
+    perspective_team = request.args.get('team')
+    season = request.args.get('season')
+    
+    difficulty_data = get_fixture_difficulty_for_api(
+        int(fixture_id), perspective_team, season
+    )
+    return create_response(difficulty_data)
+
+
+@blueprint.route("/team/<team>/fixture_difficulties", methods=["GET"])
+def get_team_fixture_difficulties(team):
+    """
+    Get fixture difficulties for a team over a period.
+    
+    Args:
+        team: Team name (3-letter code or full name)
+        
+    Query parameters:
+        gameweek_start: Starting gameweek (required)
+        gameweek_end: Ending gameweek (required)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with team's fixture difficulties
+    """
+    gameweek_start = request.args.get('gameweek_start')
+    gameweek_end = request.args.get('gameweek_end')
+    season = request.args.get('season')
+    
+    if not gameweek_start or not gameweek_end:
+        return create_response({
+            "error": "gameweek_start and gameweek_end parameters are required"
+        })
+    
+    difficulties = get_team_fixture_difficulties_for_api(
+        team, gameweek_start, gameweek_end, season
+    )
+    return create_response(difficulties)
+
+
+@blueprint.route("/fixture_difficulties/all_teams", methods=["GET"])
+def get_all_teams_fixture_difficulties():
+    """
+    Get average fixture difficulties for all teams over a period.
+    
+    Query parameters:
+        gameweek_start: Starting gameweek (required)
+        gameweek_end: Ending gameweek (required)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary mapping team names to their average difficulties
+    """
+    gameweek_start = request.args.get('gameweek_start')
+    gameweek_end = request.args.get('gameweek_end')
+    season = request.args.get('season')
+    
+    if not gameweek_start or not gameweek_end:
+        return create_response({
+            "error": "gameweek_start and gameweek_end parameters are required"
+        })
+    
+    difficulties = get_all_teams_fixture_difficulties_for_api(
+        gameweek_start, gameweek_end, season
+    )
+    return create_response(difficulties)
+
+
+@blueprint.route("/gameweek/<gameweek>/fixture_difficulties", methods=["GET"])
+def get_gameweek_fixture_difficulties(gameweek):
+    """
+    Get fixture difficulties for all fixtures in a specific gameweek.
+    
+    Args:
+        gameweek: Gameweek number
+        
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with all fixtures and their difficulties for the gameweek
+    """
+    season = request.args.get('season')
+    
+    difficulties = get_gameweek_fixture_difficulties_for_api(gameweek, season)
+    return create_response(difficulties)
+
+
+@blueprint.route("/fixture_difficulties/validate", methods=["GET"])
+def validate_fixture_difficulty_predictions():
+    """
+    Validate fixture difficulty predictions against actual results.
+    
+    Query parameters:
+        season: Season to validate (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with validation metrics including accuracy and correlation
+    """
+    season = request.args.get('season')
+    
+    validation_results = validate_fixture_difficulty_predictions_for_api(season)
+    return create_response(validation_results)
+
+
+@blueprint.route("/team_strength/<team>", methods=["GET"])
+def get_team_strength(team):
+    """
+    Get comprehensive team strength analysis for a specific team.
+    
+    Args:
+        team: Team name (3-letter code or full name)
+        
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        gameweek: Specific gameweek (optional, defaults to most recent)
+        
+    Returns:
+        Dictionary with comprehensive team strength data including:
+        - Attacking and defensive strengths (home/away)
+        - Uncertainty quantification
+        - Expected goals metrics
+        - Form indicators
+        - Model metadata
+    """
+    season = request.args.get('season')
+    gameweek = request.args.get('gameweek')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    strength_data = get_team_strength_for_api(team, season, gameweek)
+    return create_response(strength_data)
+
+
+@blueprint.route("/team_strength", methods=["GET"])
+def get_all_team_strengths():
+    """
+    Get team strengths for all teams in the league.
+    
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        gameweek: Specific gameweek (optional, defaults to most recent)
+        
+    Returns:
+        Dictionary mapping team names to their strength data
+    """
+    season = request.args.get('season')
+    gameweek = request.args.get('gameweek')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    all_strengths = get_all_team_strengths_for_api(season, gameweek)
+    return create_response(all_strengths)
+
+
+@blueprint.route("/team_strength/compare/<team1>/<team2>", methods=["GET"])
+def compare_team_strengths(team1, team2):
+    """
+    Compare strengths between two teams with head-to-head analysis.
+    
+    Args:
+        team1: First team name
+        team2: Second team name
+        
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        gameweek: Specific gameweek (optional, defaults to most recent)
+        
+    Returns:
+        Dictionary with detailed team strength comparison including:
+        - Head-to-head advantage calculations
+        - Venue-specific comparisons
+        - Predicted match outcomes
+        - Individual team strength profiles
+    """
+    season = request.args.get('season')
+    gameweek = request.args.get('gameweek')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    comparison_data = compare_team_strengths_for_api(team1, team2, season, gameweek)
+    return create_response(comparison_data)
+
+
+@blueprint.route("/team_strength/<team>/trends", methods=["GET"])
+def get_team_strength_trends(team):
+    """
+    Get historical team strength trends and trajectory analysis.
+    
+    Args:
+        team: Team name (3-letter code or full name)
+        
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        num_gameweeks: Number of recent gameweeks to analyze (optional, default 10)
+        
+    Returns:
+        Dictionary with team strength trends including:
+        - Historical strength values over time
+        - Trend direction and volatility
+        - Change indicators
+        - Performance trajectory
+    """
+    season = request.args.get('season')
+    num_gameweeks = request.args.get('num_gameweeks', '10')
+    
+    try:
+        num_gameweeks = int(num_gameweeks)
+        if num_gameweeks < 1 or num_gameweeks > 38:
+            return create_response({"error": "num_gameweeks must be between 1 and 38"})
+    except ValueError:
+        return create_response({"error": "Invalid num_gameweeks parameter"})
+    
+    trends_data = get_team_strength_trends_for_api(team, season, num_gameweeks)
+    return create_response(trends_data)
+
+
+@blueprint.route("/team_strength/update", methods=["POST"])
+def update_team_strengths():
+    """
+    Update team strengths for all teams in the current gameweek.
+    
+    This endpoint triggers a full recalculation of team strengths using
+    the latest match data and Bayesian inference.
+    
+    Query parameters:
+        season: Season to update (optional, defaults to current season)
+        gameweek: Gameweek to update (optional, defaults to last finished gameweek)
+        
+    Returns:
+        Dictionary with update results including teams updated and timing
+    """
+    season = request.args.get('season')
+    gameweek = request.args.get('gameweek')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    update_results = update_team_strengths_for_api(season, gameweek)
+    return create_response(update_results)
+
+
+@blueprint.route("/team_strength/validate", methods=["GET"])
+def validate_team_strength_model():
+    """
+    Validate the team strength model performance against actual results.
+    
+    This endpoint checks whether the team strength ratings correlate with
+    actual match outcomes to ensure model accuracy meets requirements.
+    
+    Query parameters:
+        season: Season to validate (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with validation metrics including:
+        - Pearson and Spearman correlations
+        - Prediction accuracy
+        - Mean absolute error and RMSE
+        - Compliance with >0.7 correlation target
+    """
+    season = request.args.get('season')
+    
+    validation_results = validate_team_strength_model_for_api(season)
+    return create_response(validation_results)
+
+
+# Rotation Risk Endpoints
+
+@blueprint.route("/rotation_risk/player/<int:player_id>", methods=["GET"])
+def get_player_rotation_risk(player_id):
+    """
+    Get rotation risk prediction for a specific player.
+    
+    Args:
+        player_id: Player database ID
+        
+    Query parameters:
+        gameweek: Target gameweek (optional, defaults to next gameweek)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with rotation risk prediction including:
+        - Overall rotation risk score (0-1)
+        - Confidence level
+        - Risk factors breakdown
+        - Risk level description
+    """
+    gameweek = request.args.get('gameweek')
+    season = request.args.get('season')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    rotation_risk = get_rotation_risk_for_player_api(player_id, gameweek, season)
+    return create_response(rotation_risk)
+
+
+@blueprint.route("/rotation_risk/team/<team>", methods=["GET"])
+def get_team_rotation_risks(team):
+    """
+    Get rotation risks for all players in a team.
+    
+    Args:
+        team: Team abbreviation (e.g., 'ARS', 'MCI')
+        
+    Query parameters:
+        gameweek: Target gameweek (optional, defaults to next gameweek)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with team rotation risks including:
+        - All players with their rotation risks
+        - Team averages and summaries
+        - High-risk and low-risk player lists
+    """
+    gameweek = request.args.get('gameweek')
+    season = request.args.get('season')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    team_risks = get_team_rotation_risks_for_api(team, gameweek, season)
+    return create_response(team_risks)
+
+
+@blueprint.route("/rotation_risk/high_risk", methods=["GET"])
+def get_high_rotation_risk_players():
+    """
+    Get players with highest rotation risk across all teams.
+    
+    Query parameters:
+        gameweek: Target gameweek (optional, defaults to next gameweek)
+        season: Season (optional, defaults to current season)
+        threshold: Minimum rotation risk threshold (optional, default 0.6)
+        limit: Maximum number of players to return (optional, default 20)
+        
+    Returns:
+        Dictionary with high-risk players including:
+        - Players exceeding rotation risk threshold
+        - Risk factors for each player
+        - Team and position information
+    """
+    gameweek = request.args.get('gameweek')
+    season = request.args.get('season')
+    threshold = request.args.get('threshold', '0.6')
+    limit = request.args.get('limit', '20')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    try:
+        threshold = float(threshold)
+        limit = int(limit)
+        if threshold < 0 or threshold > 1:
+            return create_response({"error": "Threshold must be between 0 and 1"})
+        if limit < 1 or limit > 100:
+            return create_response({"error": "Limit must be between 1 and 100"})
+    except ValueError:
+        return create_response({"error": "Invalid threshold or limit parameter"})
+    
+    high_risk_players = get_high_rotation_risk_players_for_api(gameweek, season, threshold, limit)
+    return create_response(high_risk_players)
+
+
+@blueprint.route("/rotation_risk/manager_patterns/<team>", methods=["GET"])
+def get_manager_rotation_patterns(team):
+    """
+    Get manager rotation patterns and behavioral analysis for a team.
+    
+    Args:
+        team: Team abbreviation (e.g., 'ARS', 'MCI')
+        
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with manager patterns including:
+        - Overall rotation tendencies
+        - Position-specific rotation rates
+        - Competition priorities
+        - Behavioral analysis and descriptions
+    """
+    season = request.args.get('season')
+    
+    manager_patterns = get_manager_rotation_patterns_for_api(team, season)
+    return create_response(manager_patterns)
+
+
+@blueprint.route("/rotation_risk/fixture_congestion/<team>", methods=["GET"])
+def get_fixture_congestion(team):
+    """
+    Get fixture congestion analysis for a team.
+    
+    Args:
+        team: Team abbreviation (e.g., 'ARS', 'MCI')
+        
+    Query parameters:
+        gameweek: Target gameweek (optional, defaults to next gameweek)
+        season: Season (optional, defaults to current season)
+        
+    Returns:
+        Dictionary with congestion analysis including:
+        - Overall congestion score
+        - Fixture counts in various time windows
+        - Travel burden analysis
+        - Recovery time metrics
+        - Recommendations based on congestion level
+    """
+    gameweek = request.args.get('gameweek')
+    season = request.args.get('season')
+    
+    if gameweek:
+        try:
+            gameweek = int(gameweek)
+        except ValueError:
+            return create_response({"error": "Invalid gameweek parameter"})
+    
+    congestion_data = get_fixture_congestion_for_api(team, gameweek, season)
+    return create_response(congestion_data)
 
 
 def create_app(name=__name__):
