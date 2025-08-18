@@ -10,10 +10,6 @@ import warnings
 
 import requests
 
-# Import structured logging
-from airsenal.framework.logging_config import get_logger, set_context
-from airsenal.framework.logging_utils import log_api_call, api_logger, timed
-
 from airsenal.framework.env import (
     DISCORD_WEBHOOK,
     FPL_LEAGUE_ID,
@@ -22,6 +18,10 @@ from airsenal.framework.env import (
     FPL_TEAM_ID,
     save_env,
 )
+
+# Import structured logging
+from airsenal.framework.logging_config import set_context, timed
+from airsenal.framework.logging_utils import api_logger
 
 API_HOME = "https://fantasy.premierleague.com/api"
 
@@ -490,27 +490,23 @@ class FPLDataFetcher:
         tries = 0
         r = None
         start_time = time.time()
-        
+
         # Set context for this API call
-        set_context(
-            service="FPL_API",
-            endpoint=url,
-            max_attempts=attempts
-        )
-        
+        set_context(service="FPL_API", endpoint=url, max_attempts=attempts)
+
         api_logger.logger.info(
             "Starting FPL API request",
             url=url,
             max_attempts=attempts,
-            event_type="api_request_start"
+            event_type="api_request_start",
         )
-        
+
         while tries < attempts:
             try:
                 request_start = time.time()
                 r = self.rsession.get(url)
                 request_time = time.time() - request_start
-                
+
                 api_logger.log_api_call(
                     service="FPL_API",
                     endpoint=url,
@@ -520,7 +516,7 @@ class FPLDataFetcher:
                     response_size=len(r.content) if r.content else 0,
                 )
                 break
-                
+
             except requests.exceptions.ConnectionError as e:
                 tries += 1
                 api_logger.log_api_error(
@@ -530,7 +526,7 @@ class FPLDataFetcher:
                     retry_count=tries,
                     will_retry=tries < attempts,
                 )
-                
+
                 if tries == attempts:
                     total_time = time.time() - start_time
                     api_logger.logger.error(
@@ -538,7 +534,7 @@ class FPLDataFetcher:
                         url=url,
                         total_attempts=attempts,
                         total_time=total_time,
-                        event_type="api_request_failed"
+                        event_type="api_request_failed",
                     )
                     msg = (
                         f"{err_msg}: Failed to connect to FPL API when requesting {url}"
@@ -552,7 +548,7 @@ class FPLDataFetcher:
                 "FPL API request returned None",
                 url=url,
                 total_time=total_time,
-                event_type="api_request_error"
+                event_type="api_request_error",
             )
             msg = f"{err_msg}: Failed to connect to FPL API when requesting {url}"
             raise RuntimeError(msg)
@@ -560,7 +556,7 @@ class FPLDataFetcher:
         if r.status_code == 200:
             total_time = time.time() - start_time
             response_data = json.loads(r.content.decode("utf-8"))
-            
+
             api_logger.logger.info(
                 "FPL API request successful",
                 url=url,
@@ -568,9 +564,9 @@ class FPLDataFetcher:
                 response_size=len(r.content),
                 total_time=total_time,
                 data_type=type(response_data).__name__,
-                event_type="api_request_success"
+                event_type="api_request_success",
             )
-            
+
             return response_data
 
         try:
@@ -584,7 +580,7 @@ class FPLDataFetcher:
                 total_time=total_time,
                 error=str(e),
                 response_content=r.content.decode("utf-8")[:500],
-                event_type="api_request_http_error"
+                event_type="api_request_http_error",
             )
             msg = f"{err_msg}: {e}"
             raise requests.HTTPError(msg) from e

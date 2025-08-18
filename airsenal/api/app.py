@@ -16,14 +16,20 @@ from airsenal.framework.api_utils import (
     add_session_player,
     best_transfer_suggestions,
     combine_player_info,
+    compare_set_piece_specialists,
     compare_team_strengths_for_api,
     create_response,
+    detect_set_piece_role_changes,
     fill_session_squad,
     get_all_penalty_takers_for_api,
+    get_all_set_piece_specialists_for_api,
     get_all_team_strengths_for_api,
     get_all_teams_fixture_difficulties_for_api,
+    # Set piece specialist functions
+    get_corner_specialists_for_team,
     get_fixture_congestion_for_api,
     get_fixture_difficulty_for_api,
+    get_free_kick_specialists_for_team,
     get_gameweek_fixture_difficulties_for_api,
     get_high_rotation_risk_players_for_api,
     get_manager_rotation_patterns_for_api,
@@ -33,15 +39,19 @@ from airsenal.framework.api_utils import (
     get_session_budget,
     get_session_players,
     get_session_predictions,
+    get_set_piece_effectiveness_analysis,
+    get_set_piece_specialist_confidence,
     get_team_fixture_difficulties_for_api,
     get_team_rotation_risks_for_api,
     get_team_strength_for_api,
     get_team_strength_trends_for_api,
+    get_throw_in_specialists_for_team,
     list_players_for_api,
     list_teams_for_api,
     remove_db_session,
     remove_session_player,
     set_session_budget,
+    update_set_piece_assignments_for_api,
     update_team_strengths_for_api,
     validate_fixture_difficulty_predictions_for_api,
     validate_session_squad,
@@ -215,7 +225,7 @@ def session_budget():
 def get_all_penalty_takers():
     """
     Get penalty takers for all teams in the current season.
-    
+
     Returns:
         Dictionary mapping team names to their penalty takers with confidence scores
     """
@@ -227,14 +237,14 @@ def get_all_penalty_takers():
 def get_team_penalty_takers(team):
     """
     Get penalty takers for a specific team.
-    
+
     Args:
         team: Team name (3-letter code or full name)
-        
+
     Returns:
         List of penalty taker assignments for the team
     """
-    season = request.args.get('season')  # Optional season parameter
+    season = request.args.get("season")  # Optional season parameter
     penalty_takers = get_penalty_takers_for_team(team, season)
     return create_response(penalty_takers)
 
@@ -243,14 +253,14 @@ def get_team_penalty_takers(team):
 def get_player_penalty_info(player_id):
     """
     Get penalty taker information for a specific player.
-    
+
     Args:
         player_id: Player ID
-        
+
     Returns:
         Dictionary with penalty taker confidence and statistics
     """
-    season = request.args.get('season')  # Optional season parameter
+    season = request.args.get("season")  # Optional season parameter
     penalty_info = get_penalty_taker_confidence(int(player_id), season)
     return create_response(penalty_info)
 
@@ -259,20 +269,20 @@ def get_player_penalty_info(player_id):
 def get_fixture_difficulty(fixture_id):
     """
     Get fixture difficulty rating for a specific fixture.
-    
+
     Args:
         fixture_id: Fixture ID
-        
+
     Query parameters:
         team: Calculate difficulty from this team's perspective (optional)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with fixture difficulty rating and component breakdown
     """
-    perspective_team = request.args.get('team')
-    season = request.args.get('season')
-    
+    perspective_team = request.args.get("team")
+    season = request.args.get("season")
+
     difficulty_data = get_fixture_difficulty_for_api(
         int(fixture_id), perspective_team, season
     )
@@ -283,27 +293,27 @@ def get_fixture_difficulty(fixture_id):
 def get_team_fixture_difficulties(team):
     """
     Get fixture difficulties for a team over a period.
-    
+
     Args:
         team: Team name (3-letter code or full name)
-        
+
     Query parameters:
         gameweek_start: Starting gameweek (required)
         gameweek_end: Ending gameweek (required)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with team's fixture difficulties
     """
-    gameweek_start = request.args.get('gameweek_start')
-    gameweek_end = request.args.get('gameweek_end')
-    season = request.args.get('season')
-    
+    gameweek_start = request.args.get("gameweek_start")
+    gameweek_end = request.args.get("gameweek_end")
+    season = request.args.get("season")
+
     if not gameweek_start or not gameweek_end:
-        return create_response({
-            "error": "gameweek_start and gameweek_end parameters are required"
-        })
-    
+        return create_response(
+            {"error": "gameweek_start and gameweek_end parameters are required"}
+        )
+
     difficulties = get_team_fixture_difficulties_for_api(
         team, gameweek_start, gameweek_end, season
     )
@@ -314,24 +324,24 @@ def get_team_fixture_difficulties(team):
 def get_all_teams_fixture_difficulties():
     """
     Get average fixture difficulties for all teams over a period.
-    
+
     Query parameters:
         gameweek_start: Starting gameweek (required)
         gameweek_end: Ending gameweek (required)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary mapping team names to their average difficulties
     """
-    gameweek_start = request.args.get('gameweek_start')
-    gameweek_end = request.args.get('gameweek_end')
-    season = request.args.get('season')
-    
+    gameweek_start = request.args.get("gameweek_start")
+    gameweek_end = request.args.get("gameweek_end")
+    season = request.args.get("season")
+
     if not gameweek_start or not gameweek_end:
-        return create_response({
-            "error": "gameweek_start and gameweek_end parameters are required"
-        })
-    
+        return create_response(
+            {"error": "gameweek_start and gameweek_end parameters are required"}
+        )
+
     difficulties = get_all_teams_fixture_difficulties_for_api(
         gameweek_start, gameweek_end, season
     )
@@ -342,18 +352,18 @@ def get_all_teams_fixture_difficulties():
 def get_gameweek_fixture_difficulties(gameweek):
     """
     Get fixture difficulties for all fixtures in a specific gameweek.
-    
+
     Args:
         gameweek: Gameweek number
-        
+
     Query parameters:
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with all fixtures and their difficulties for the gameweek
     """
-    season = request.args.get('season')
-    
+    season = request.args.get("season")
+
     difficulties = get_gameweek_fixture_difficulties_for_api(gameweek, season)
     return create_response(difficulties)
 
@@ -362,15 +372,15 @@ def get_gameweek_fixture_difficulties(gameweek):
 def validate_fixture_difficulty_predictions():
     """
     Validate fixture difficulty predictions against actual results.
-    
+
     Query parameters:
         season: Season to validate (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with validation metrics including accuracy and correlation
     """
-    season = request.args.get('season')
-    
+    season = request.args.get("season")
+
     validation_results = validate_fixture_difficulty_predictions_for_api(season)
     return create_response(validation_results)
 
@@ -379,14 +389,14 @@ def validate_fixture_difficulty_predictions():
 def get_team_strength(team):
     """
     Get comprehensive team strength analysis for a specific team.
-    
+
     Args:
         team: Team name (3-letter code or full name)
-        
+
     Query parameters:
         season: Season (optional, defaults to current season)
         gameweek: Specific gameweek (optional, defaults to most recent)
-        
+
     Returns:
         Dictionary with comprehensive team strength data including:
         - Attacking and defensive strengths (home/away)
@@ -395,15 +405,15 @@ def get_team_strength(team):
         - Form indicators
         - Model metadata
     """
-    season = request.args.get('season')
-    gameweek = request.args.get('gameweek')
-    
+    season = request.args.get("season")
+    gameweek = request.args.get("gameweek")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     strength_data = get_team_strength_for_api(team, season, gameweek)
     return create_response(strength_data)
 
@@ -412,23 +422,23 @@ def get_team_strength(team):
 def get_all_team_strengths():
     """
     Get team strengths for all teams in the league.
-    
+
     Query parameters:
         season: Season (optional, defaults to current season)
         gameweek: Specific gameweek (optional, defaults to most recent)
-        
+
     Returns:
         Dictionary mapping team names to their strength data
     """
-    season = request.args.get('season')
-    gameweek = request.args.get('gameweek')
-    
+    season = request.args.get("season")
+    gameweek = request.args.get("gameweek")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     all_strengths = get_all_team_strengths_for_api(season, gameweek)
     return create_response(all_strengths)
 
@@ -437,15 +447,15 @@ def get_all_team_strengths():
 def compare_team_strengths(team1, team2):
     """
     Compare strengths between two teams with head-to-head analysis.
-    
+
     Args:
         team1: First team name
         team2: Second team name
-        
+
     Query parameters:
         season: Season (optional, defaults to current season)
         gameweek: Specific gameweek (optional, defaults to most recent)
-        
+
     Returns:
         Dictionary with detailed team strength comparison including:
         - Head-to-head advantage calculations
@@ -453,15 +463,15 @@ def compare_team_strengths(team1, team2):
         - Predicted match outcomes
         - Individual team strength profiles
     """
-    season = request.args.get('season')
-    gameweek = request.args.get('gameweek')
-    
+    season = request.args.get("season")
+    gameweek = request.args.get("gameweek")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     comparison_data = compare_team_strengths_for_api(team1, team2, season, gameweek)
     return create_response(comparison_data)
 
@@ -470,14 +480,14 @@ def compare_team_strengths(team1, team2):
 def get_team_strength_trends(team):
     """
     Get historical team strength trends and trajectory analysis.
-    
+
     Args:
         team: Team name (3-letter code or full name)
-        
+
     Query parameters:
         season: Season (optional, defaults to current season)
         num_gameweeks: Number of recent gameweeks to analyze (optional, default 10)
-        
+
     Returns:
         Dictionary with team strength trends including:
         - Historical strength values over time
@@ -485,16 +495,16 @@ def get_team_strength_trends(team):
         - Change indicators
         - Performance trajectory
     """
-    season = request.args.get('season')
-    num_gameweeks = request.args.get('num_gameweeks', '10')
-    
+    season = request.args.get("season")
+    num_gameweeks = request.args.get("num_gameweeks", "10")
+
     try:
         num_gameweeks = int(num_gameweeks)
         if num_gameweeks < 1 or num_gameweeks > 38:
             return create_response({"error": "num_gameweeks must be between 1 and 38"})
     except ValueError:
         return create_response({"error": "Invalid num_gameweeks parameter"})
-    
+
     trends_data = get_team_strength_trends_for_api(team, season, num_gameweeks)
     return create_response(trends_data)
 
@@ -503,26 +513,26 @@ def get_team_strength_trends(team):
 def update_team_strengths():
     """
     Update team strengths for all teams in the current gameweek.
-    
+
     This endpoint triggers a full recalculation of team strengths using
     the latest match data and Bayesian inference.
-    
+
     Query parameters:
         season: Season to update (optional, defaults to current season)
         gameweek: Gameweek to update (optional, defaults to last finished gameweek)
-        
+
     Returns:
         Dictionary with update results including teams updated and timing
     """
-    season = request.args.get('season')
-    gameweek = request.args.get('gameweek')
-    
+    season = request.args.get("season")
+    gameweek = request.args.get("gameweek")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     update_results = update_team_strengths_for_api(season, gameweek)
     return create_response(update_results)
 
@@ -531,13 +541,13 @@ def update_team_strengths():
 def validate_team_strength_model():
     """
     Validate the team strength model performance against actual results.
-    
+
     This endpoint checks whether the team strength ratings correlate with
     actual match outcomes to ensure model accuracy meets requirements.
-    
+
     Query parameters:
         season: Season to validate (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with validation metrics including:
         - Pearson and Spearman correlations
@@ -545,26 +555,27 @@ def validate_team_strength_model():
         - Mean absolute error and RMSE
         - Compliance with >0.7 correlation target
     """
-    season = request.args.get('season')
-    
+    season = request.args.get("season")
+
     validation_results = validate_team_strength_model_for_api(season)
     return create_response(validation_results)
 
 
 # Rotation Risk Endpoints
 
+
 @blueprint.route("/rotation_risk/player/<int:player_id>", methods=["GET"])
 def get_player_rotation_risk(player_id):
     """
     Get rotation risk prediction for a specific player.
-    
+
     Args:
         player_id: Player database ID
-        
+
     Query parameters:
         gameweek: Target gameweek (optional, defaults to next gameweek)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with rotation risk prediction including:
         - Overall rotation risk score (0-1)
@@ -572,15 +583,15 @@ def get_player_rotation_risk(player_id):
         - Risk factors breakdown
         - Risk level description
     """
-    gameweek = request.args.get('gameweek')
-    season = request.args.get('season')
-    
+    gameweek = request.args.get("gameweek")
+    season = request.args.get("season")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     rotation_risk = get_rotation_risk_for_player_api(player_id, gameweek, season)
     return create_response(rotation_risk)
 
@@ -589,29 +600,29 @@ def get_player_rotation_risk(player_id):
 def get_team_rotation_risks(team):
     """
     Get rotation risks for all players in a team.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
-        
+
     Query parameters:
         gameweek: Target gameweek (optional, defaults to next gameweek)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with team rotation risks including:
         - All players with their rotation risks
         - Team averages and summaries
         - High-risk and low-risk player lists
     """
-    gameweek = request.args.get('gameweek')
-    season = request.args.get('season')
-    
+    gameweek = request.args.get("gameweek")
+    season = request.args.get("season")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     team_risks = get_team_rotation_risks_for_api(team, gameweek, season)
     return create_response(team_risks)
 
@@ -620,30 +631,30 @@ def get_team_rotation_risks(team):
 def get_high_rotation_risk_players():
     """
     Get players with highest rotation risk across all teams.
-    
+
     Query parameters:
         gameweek: Target gameweek (optional, defaults to next gameweek)
         season: Season (optional, defaults to current season)
         threshold: Minimum rotation risk threshold (optional, default 0.6)
         limit: Maximum number of players to return (optional, default 20)
-        
+
     Returns:
         Dictionary with high-risk players including:
         - Players exceeding rotation risk threshold
         - Risk factors for each player
         - Team and position information
     """
-    gameweek = request.args.get('gameweek')
-    season = request.args.get('season')
-    threshold = request.args.get('threshold', '0.6')
-    limit = request.args.get('limit', '20')
-    
+    gameweek = request.args.get("gameweek")
+    season = request.args.get("season")
+    threshold = request.args.get("threshold", "0.6")
+    limit = request.args.get("limit", "20")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     try:
         threshold = float(threshold)
         limit = int(limit)
@@ -653,8 +664,10 @@ def get_high_rotation_risk_players():
             return create_response({"error": "Limit must be between 1 and 100"})
     except ValueError:
         return create_response({"error": "Invalid threshold or limit parameter"})
-    
-    high_risk_players = get_high_rotation_risk_players_for_api(gameweek, season, threshold, limit)
+
+    high_risk_players = get_high_rotation_risk_players_for_api(
+        gameweek, season, threshold, limit
+    )
     return create_response(high_risk_players)
 
 
@@ -662,13 +675,13 @@ def get_high_rotation_risk_players():
 def get_manager_rotation_patterns(team):
     """
     Get manager rotation patterns and behavioral analysis for a team.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
-        
+
     Query parameters:
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with manager patterns including:
         - Overall rotation tendencies
@@ -676,8 +689,8 @@ def get_manager_rotation_patterns(team):
         - Competition priorities
         - Behavioral analysis and descriptions
     """
-    season = request.args.get('season')
-    
+    season = request.args.get("season")
+
     manager_patterns = get_manager_rotation_patterns_for_api(team, season)
     return create_response(manager_patterns)
 
@@ -686,14 +699,14 @@ def get_manager_rotation_patterns(team):
 def get_fixture_congestion(team):
     """
     Get fixture congestion analysis for a team.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
-        
+
     Query parameters:
         gameweek: Target gameweek (optional, defaults to next gameweek)
         season: Season (optional, defaults to current season)
-        
+
     Returns:
         Dictionary with congestion analysis including:
         - Overall congestion score
@@ -702,17 +715,292 @@ def get_fixture_congestion(team):
         - Recovery time metrics
         - Recommendations based on congestion level
     """
-    gameweek = request.args.get('gameweek')
-    season = request.args.get('season')
-    
+    gameweek = request.args.get("gameweek")
+    season = request.args.get("season")
+
     if gameweek:
         try:
             gameweek = int(gameweek)
         except ValueError:
             return create_response({"error": "Invalid gameweek parameter"})
-    
+
     congestion_data = get_fixture_congestion_for_api(team, gameweek, season)
     return create_response(congestion_data)
+
+
+# Set Piece Specialist Endpoints
+
+
+@blueprint.route("/set_piece/corners/<team>", methods=["GET"])
+def get_team_corner_specialists(team):
+    """
+    Get corner kick specialists for a specific team.
+
+    Args:
+        team: Team name (3-letter code or full name)
+
+    Query parameters:
+        corner_type: "left", "right", or "both" (optional, default "both")
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        List of corner specialist assignments for the team
+    """
+    corner_type = request.args.get("corner_type", "both")
+    season = request.args.get("season")
+
+    corner_specialists = get_corner_specialists_for_team(team, season, corner_type)
+    return create_response(corner_specialists)
+
+
+@blueprint.route("/set_piece/free_kicks/<team>", methods=["GET"])
+def get_team_free_kick_specialists(team):
+    """
+    Get free kick specialists for a specific team.
+
+    Args:
+        team: Team name (3-letter code or full name)
+
+    Query parameters:
+        distance: "close", "long", or "both" (optional, default "both")
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        List of free kick specialist assignments for the team
+    """
+    distance = request.args.get("distance", "both")
+    season = request.args.get("season")
+
+    free_kick_specialists = get_free_kick_specialists_for_team(team, season, distance)
+    return create_response(free_kick_specialists)
+
+
+@blueprint.route("/set_piece/throw_ins/<team>", methods=["GET"])
+def get_team_throw_in_specialists(team):
+    """
+    Get long throw-in specialists for a specific team.
+
+    Args:
+        team: Team name (3-letter code or full name)
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        List of throw-in specialist assignments for the team
+    """
+    season = request.args.get("season")
+
+    throw_in_specialists = get_throw_in_specialists_for_team(team, season)
+    return create_response(throw_in_specialists)
+
+
+@blueprint.route("/set_piece/all", methods=["GET"])
+def get_all_set_piece_specialists():
+    """
+    Get all set piece specialists for all teams and types.
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        Nested dictionary mapping teams -> set piece types -> specialists
+    """
+    season = request.args.get("season")
+
+    all_specialists = get_all_set_piece_specialists_for_api(season)
+    return create_response(all_specialists)
+
+
+@blueprint.route("/player/<int:player_id>/set_piece/<set_piece_type>", methods=["GET"])
+def get_player_set_piece_info(player_id, set_piece_type):
+    """
+    Get set piece specialist information for a specific player and type.
+
+    Args:
+        player_id: Player ID
+        set_piece_type: Type of set piece (corner_left, free_kick_close, etc.)
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        Dictionary with set piece specialist confidence and statistics
+    """
+    season = request.args.get("season")
+
+    # Validate set piece type
+    valid_types = [
+        "corner_left",
+        "corner_right",
+        "corner_both",
+        "free_kick_close",
+        "free_kick_long",
+        "free_kick_indirect",
+        "throw_in_long",
+    ]
+
+    if set_piece_type not in valid_types:
+        return create_response(
+            {
+                "error": f"Invalid set piece type. Must be one of: {', '.join(valid_types)}"
+            }
+        )
+
+    specialist_info = get_set_piece_specialist_confidence(
+        player_id, set_piece_type, season
+    )
+    return create_response(specialist_info)
+
+
+@blueprint.route(
+    "/player/<int:player_id>/set_piece/<set_piece_type>/effectiveness", methods=["GET"]
+)
+def get_player_set_piece_effectiveness(player_id, set_piece_type):
+    """
+    Get effectiveness analysis for a set piece specialist.
+
+    Args:
+        player_id: Player ID
+        set_piece_type: Type of set piece
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        Dictionary with effectiveness metrics including success rates and outcomes
+    """
+    season = request.args.get("season")
+
+    # Validate set piece type
+    valid_types = [
+        "corner_left",
+        "corner_right",
+        "corner_both",
+        "free_kick_close",
+        "free_kick_long",
+        "free_kick_indirect",
+        "throw_in_long",
+    ]
+
+    if set_piece_type not in valid_types:
+        return create_response(
+            {
+                "error": f"Invalid set piece type. Must be one of: {', '.join(valid_types)}"
+            }
+        )
+
+    effectiveness = get_set_piece_effectiveness_analysis(
+        player_id, set_piece_type, season
+    )
+    return create_response(effectiveness)
+
+
+@blueprint.route("/set_piece/compare/<set_piece_type>", methods=["POST"])
+def compare_set_piece_specialists_endpoint(set_piece_type):
+    """
+    Compare effectiveness of multiple set piece specialists.
+
+    Args:
+        set_piece_type: Type of set piece to compare
+
+    Request body:
+        JSON with 'player_ids' list and optional 'season'
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+
+    Returns:
+        Dictionary with comparative analysis of specialists
+    """
+    season = request.args.get("season")
+
+    # Validate set piece type
+    valid_types = [
+        "corner_left",
+        "corner_right",
+        "corner_both",
+        "free_kick_close",
+        "free_kick_long",
+        "free_kick_indirect",
+        "throw_in_long",
+    ]
+
+    if set_piece_type not in valid_types:
+        return create_response(
+            {
+                "error": f"Invalid set piece type. Must be one of: {', '.join(valid_types)}"
+            }
+        )
+
+    try:
+        data = json.loads(request.data.decode("utf-8"))
+        player_ids = data.get("player_ids", [])
+
+        if not player_ids or len(player_ids) < 2:
+            return create_response(
+                {"error": "At least 2 player IDs required for comparison"}
+            )
+
+        # Override season from request body if provided
+        if "season" in data:
+            season = data["season"]
+
+        comparison = compare_set_piece_specialists(player_ids, set_piece_type, season)
+        return create_response(comparison)
+
+    except (json.JSONDecodeError, KeyError) as e:
+        return create_response({"error": f"Invalid request format: {e!s}"})
+
+
+@blueprint.route("/set_piece/role_changes/<team>", methods=["GET"])
+def get_team_set_piece_role_changes(team):
+    """
+    Detect recent changes in set piece specialist assignments for a team.
+
+    Args:
+        team: Team name (3-letter code or full name)
+
+    Query parameters:
+        season: Season (optional, defaults to current season)
+        lookback_gameweeks: Number of gameweeks to look back (optional, default 5)
+
+    Returns:
+        Dictionary with detected role changes across all set piece types
+    """
+    season = request.args.get("season")
+    lookback_gameweeks = request.args.get("lookback_gameweeks", "5")
+
+    try:
+        lookback_gameweeks = int(lookback_gameweeks)
+        if lookback_gameweeks < 1 or lookback_gameweeks > 38:
+            return create_response(
+                {"error": "lookback_gameweeks must be between 1 and 38"}
+            )
+    except ValueError:
+        return create_response({"error": "Invalid lookback_gameweeks parameter"})
+
+    role_changes = detect_set_piece_role_changes(team, season, lookback_gameweeks)
+    return create_response(role_changes)
+
+
+@blueprint.route("/set_piece/update", methods=["POST"])
+def update_set_piece_assignments():
+    """
+    Update set piece specialist assignments for all teams or a specific team.
+
+    Query parameters:
+        season: Season to update (optional, defaults to current season)
+        team: Specific team to update (optional, defaults to all teams)
+
+    Returns:
+        Dictionary with update results including teams updated and timing
+    """
+    season = request.args.get("season")
+    team = request.args.get("team")
+
+    update_results = update_set_piece_assignments_for_api(season, team)
+    return create_response(update_results)
 
 
 def create_app(name=__name__):

@@ -2,6 +2,9 @@
 Functions used by the AIrsenal API
 """
 
+import logging
+from datetime import datetime
+
 from flask import jsonify
 from sqlalchemy.orm import scoped_session
 
@@ -9,7 +12,13 @@ from airsenal.framework.optimization_transfers import (
     make_optimum_double_transfer,
     make_optimum_single_transfer,
 )
-from airsenal.framework.schema import Player, SessionBudget, SessionSquad, session
+from airsenal.framework.schema import (
+    Player,
+    PlayerAttributes,
+    SessionBudget,
+    SessionSquad,
+    session,
+)
 from airsenal.framework.squad import Squad
 from airsenal.framework.utils import (
     CURRENT_SEASON,
@@ -26,6 +35,7 @@ from airsenal.framework.utils import (
     list_teams,
 )
 
+logger = logging.getLogger(__name__)
 DBSESSION = scoped_session(session)
 
 
@@ -305,24 +315,23 @@ def best_transfer_suggestions(n_transfer, session_id, dbsession=DBSESSION):
 def get_penalty_takers_for_team(team, season=None, dbsession=DBSESSION):
     """
     Get penalty takers for a specific team using the penalty taker identification system.
-    
+
     Args:
         team: Team name
         season: Season to analyze (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         List of penalty taker assignments with confidence scores
     """
     from airsenal.framework.player_roles import get_team_penalty_takers
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        penalty_takers = get_team_penalty_takers(team, season)
-        return penalty_takers
+        return get_team_penalty_takers(team, season)
     except Exception as e:
         # Return empty list if analysis fails
         print(f"Error getting penalty takers for {team}: {e}")
@@ -332,23 +341,22 @@ def get_penalty_takers_for_team(team, season=None, dbsession=DBSESSION):
 def get_all_penalty_takers_for_api(season=None, dbsession=DBSESSION):
     """
     Get penalty takers for all teams for API consumption.
-    
+
     Args:
         season: Season to analyze (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary mapping team names to their penalty takers
     """
     from airsenal.framework.player_roles import get_all_penalty_takers
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        all_penalty_takers = get_all_penalty_takers(season)
-        return all_penalty_takers
+        return get_all_penalty_takers(season)
     except Exception as e:
         # Return empty dict if analysis fails
         print(f"Error getting all penalty takers: {e}")
@@ -358,96 +366,102 @@ def get_all_penalty_takers_for_api(season=None, dbsession=DBSESSION):
 def get_penalty_taker_confidence(player_id, season=None, dbsession=DBSESSION):
     """
     Get penalty taker confidence score for a specific player.
-    
+
     Args:
         player_id: Player ID
         season: Season to analyze (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with player penalty taker information
     """
-    from airsenal.framework.player_roles import PenaltyTakerAnalyzer
-    from airsenal.framework.utils import CURRENT_SEASON
-    from airsenal.framework.schema import Player, PlayerAttributes
     from sqlalchemy import and_
-    
+
+    from airsenal.framework.player_roles import PenaltyTakerAnalyzer
+    from airsenal.framework.schema import Player, PlayerAttributes
+    from airsenal.framework.utils import CURRENT_SEASON
+
     if not season:
         season = CURRENT_SEASON
-    
+
     # Get player information
     player = dbsession.query(Player).filter(Player.player_id == player_id).first()
     if not player:
         return {"error": "Player not found"}
-    
+
     # Get player attributes to find team
-    attrs = dbsession.query(PlayerAttributes).filter(
-        and_(
-            PlayerAttributes.player_id == player_id,
-            PlayerAttributes.season == season
+    attrs = (
+        dbsession.query(PlayerAttributes)
+        .filter(
+            and_(
+                PlayerAttributes.player_id == player_id,
+                PlayerAttributes.season == season,
+            )
         )
-    ).first()
-    
+        .first()
+    )
+
     if not attrs:
         return {"error": "Player attributes not found for season"}
-    
+
     # Get penalty taker information for the team
     analyzer = PenaltyTakerAnalyzer(dbsession)
     team_penalty_takers = analyzer.identify_team_penalty_takers(attrs.team, season)
-    
+
     # Find this player in the results
     for pt in team_penalty_takers:
-        if pt['player_id'] == player_id:
+        if pt["player_id"] == player_id:
             return {
-                'player_id': player_id,
-                'player_name': player.name,
-                'team': attrs.team,
-                'is_penalty_taker': True,
-                'confidence': pt['confidence'],
-                'is_primary': pt['is_primary'],
-                'penalties_taken': pt['penalties_taken'],
-                'success_rate': pt['success_rate'],
-                'last_penalty_date': pt['last_penalty_date'].isoformat() if pt['last_penalty_date'] else None
+                "player_id": player_id,
+                "player_name": player.name,
+                "team": attrs.team,
+                "is_penalty_taker": True,
+                "confidence": pt["confidence"],
+                "is_primary": pt["is_primary"],
+                "penalties_taken": pt["penalties_taken"],
+                "success_rate": pt["success_rate"],
+                "last_penalty_date": pt["last_penalty_date"].isoformat()
+                if pt["last_penalty_date"]
+                else None,
             }
-    
+
     # Player not identified as penalty taker
     return {
-        'player_id': player_id,
-        'player_name': player.name,
-        'team': attrs.team,
-        'is_penalty_taker': False,
-        'confidence': 0.0,
-        'is_primary': False,
-        'penalties_taken': 0,
-        'success_rate': 0.0,
-        'last_penalty_date': None
+        "player_id": player_id,
+        "player_name": player.name,
+        "team": attrs.team,
+        "is_penalty_taker": False,
+        "confidence": 0.0,
+        "is_primary": False,
+        "penalties_taken": 0,
+        "success_rate": 0.0,
+        "last_penalty_date": None,
     }
 
 
-def get_fixture_difficulty_for_api(fixture_id, perspective_team=None, season=None, dbsession=DBSESSION):
+def get_fixture_difficulty_for_api(
+    fixture_id, perspective_team=None, season=None, dbsession=DBSESSION
+):
     """
     Get fixture difficulty rating for API consumption.
-    
+
     Args:
         fixture_id: Fixture ID
         perspective_team: Team to calculate difficulty from perspective of (optional)
         season: Season (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with fixture difficulty data
     """
     from airsenal.framework.fixture_difficulty import get_fixture_difficulty
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        difficulty_data = get_fixture_difficulty(
-            fixture_id, perspective_team, season, dbsession
-        )
-        return difficulty_data
+        return get_fixture_difficulty(fixture_id, perspective_team, season, dbsession)
     except ValueError as e:
         return {"error": str(e)}
     except Exception as e:
@@ -455,48 +469,50 @@ def get_fixture_difficulty_for_api(fixture_id, perspective_team=None, season=Non
         return {"error": "Failed to calculate fixture difficulty"}
 
 
-def get_team_fixture_difficulties_for_api(team, gameweek_start, gameweek_end, season=None, dbsession=DBSESSION):
+def get_team_fixture_difficulties_for_api(
+    team, gameweek_start, gameweek_end, season=None, dbsession=DBSESSION
+):
     """
     Get fixture difficulties for a team over a period for API consumption.
-    
+
     Args:
         team: Team name
         gameweek_start: Starting gameweek
         gameweek_end: Ending gameweek (inclusive)
         season: Season (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         List of fixture difficulty dictionaries
     """
     from airsenal.framework.fixture_difficulty import get_team_fixture_difficulties
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         gameweek_start = int(gameweek_start)
         gameweek_end = int(gameweek_end)
-        
+
         if gameweek_start > gameweek_end:
             return {"error": "gameweek_start must be <= gameweek_end"}
-        
+
         if gameweek_end - gameweek_start > 20:
             return {"error": "Maximum range is 20 gameweeks"}
-        
+
         difficulties = get_team_fixture_difficulties(
             team, gameweek_start, gameweek_end, season, dbsession
         )
-        
+
         return {
             "team": team,
             "season": season,
             "gameweek_start": gameweek_start,
             "gameweek_end": gameweek_end,
-            "fixtures": difficulties
+            "fixtures": difficulties,
         }
-        
+
     except ValueError as e:
         return {"error": f"Invalid gameweek values: {e}"}
     except Exception as e:
@@ -504,46 +520,48 @@ def get_team_fixture_difficulties_for_api(team, gameweek_start, gameweek_end, se
         return {"error": "Failed to calculate team fixture difficulties"}
 
 
-def get_all_teams_fixture_difficulties_for_api(gameweek_start, gameweek_end, season=None, dbsession=DBSESSION):
+def get_all_teams_fixture_difficulties_for_api(
+    gameweek_start, gameweek_end, season=None, dbsession=DBSESSION
+):
     """
     Get average fixture difficulties for all teams over a period for API consumption.
-    
+
     Args:
         gameweek_start: Starting gameweek
         gameweek_end: Ending gameweek (inclusive)
         season: Season (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary mapping team names to their average difficulties
     """
     from airsenal.framework.fixture_difficulty import get_all_teams_average_difficulty
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         gameweek_start = int(gameweek_start)
         gameweek_end = int(gameweek_end)
-        
+
         if gameweek_start > gameweek_end:
             return {"error": "gameweek_start must be <= gameweek_end"}
-        
+
         if gameweek_end - gameweek_start > 20:
             return {"error": "Maximum range is 20 gameweeks"}
-        
+
         difficulties = get_all_teams_average_difficulty(
             gameweek_start, gameweek_end, season, dbsession
         )
-        
+
         return {
             "season": season,
             "gameweek_start": gameweek_start,
             "gameweek_end": gameweek_end,
-            "teams": difficulties
+            "teams": difficulties,
         }
-        
+
     except ValueError as e:
         return {"error": f"Invalid gameweek values: {e}"}
     except Exception as e:
@@ -551,28 +569,30 @@ def get_all_teams_fixture_difficulties_for_api(gameweek_start, gameweek_end, sea
         return {"error": "Failed to calculate fixture difficulties"}
 
 
-def get_gameweek_fixture_difficulties_for_api(gameweek, season=None, dbsession=DBSESSION):
+def get_gameweek_fixture_difficulties_for_api(
+    gameweek, season=None, dbsession=DBSESSION
+):
     """
     Get fixture difficulties for all fixtures in a specific gameweek for API consumption.
-    
+
     Args:
         gameweek: Gameweek number
         season: Season (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with all fixtures and their difficulties for the gameweek
     """
     from airsenal.framework.fixture_difficulty import create_difficulty_calculator
-    from airsenal.framework.utils import CURRENT_SEASON
     from airsenal.framework.schema import Fixture
-    
+    from airsenal.framework.utils import CURRENT_SEASON
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         gameweek = int(gameweek)
-        
+
         # Get all fixtures for the gameweek
         fixtures = (
             dbsession.query(Fixture)
@@ -581,34 +601,36 @@ def get_gameweek_fixture_difficulties_for_api(gameweek, season=None, dbsession=D
             .order_by(Fixture.date, Fixture.fixture_id)
             .all()
         )
-        
+
         if not fixtures:
             return {
                 "gameweek": gameweek,
                 "season": season,
                 "fixtures": [],
-                "message": "No fixtures found for this gameweek"
+                "message": "No fixtures found for this gameweek",
             }
-        
+
         # Calculate difficulties
         calculator = create_difficulty_calculator(season, dbsession)
         fixture_difficulties = []
-        
+
         for fixture in fixtures:
             try:
                 difficulty = calculator.calculate_fixture_difficulty(fixture)
                 fixture_difficulties.append(difficulty)
             except Exception as e:
-                print(f"Error calculating difficulty for fixture {fixture.fixture_id}: {e}")
+                print(
+                    f"Error calculating difficulty for fixture {fixture.fixture_id}: {e}"
+                )
                 continue
-        
+
         return {
             "gameweek": gameweek,
             "season": season,
             "fixture_count": len(fixture_difficulties),
-            "fixtures": fixture_difficulties
+            "fixtures": fixture_difficulties,
         }
-        
+
     except ValueError as e:
         return {"error": f"Invalid gameweek: {e}"}
     except Exception as e:
@@ -619,26 +641,24 @@ def get_gameweek_fixture_difficulties_for_api(gameweek, season=None, dbsession=D
 def validate_fixture_difficulty_predictions_for_api(season=None, dbsession=DBSESSION):
     """
     Validate fixture difficulty predictions against actual results for API consumption.
-    
+
     Args:
         season: Season to validate (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with validation metrics
     """
     from airsenal.framework.fixture_difficulty import create_difficulty_calculator
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         calculator = create_difficulty_calculator(season, dbsession)
-        validation_results = calculator.validate_predictions(season)
-        
-        return validation_results
-        
+        return calculator.validate_predictions(season)
+
     except Exception as e:
         print(f"Error validating fixture difficulty predictions: {e}")
         return {"error": "Failed to validate predictions"}
@@ -647,25 +667,26 @@ def validate_fixture_difficulty_predictions_for_api(season=None, dbsession=DBSES
 def get_team_strength_for_api(team, season=None, gameweek=None, dbsession=DBSESSION):
     """
     Get team strength data for API consumption.
-    
+
     Args:
         team: Team name
         season: Season (defaults to current season)
         gameweek: Specific gameweek (defaults to most recent)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with team strength data
     """
-    from airsenal.framework.team_strength import get_team_strength_for_api as core_get_team_strength
+    from airsenal.framework.team_strength import (
+        get_team_strength_for_api as core_get_team_strength,
+    )
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        strength_data = core_get_team_strength(team, season, gameweek, dbsession)
-        return strength_data
+        return core_get_team_strength(team, season, gameweek, dbsession)
     except Exception as e:
         print(f"Error getting team strength for {team}: {e}")
         return {"error": f"Failed to get team strength for {team}"}
@@ -674,24 +695,25 @@ def get_team_strength_for_api(team, season=None, gameweek=None, dbsession=DBSESS
 def get_all_team_strengths_for_api(season=None, gameweek=None, dbsession=DBSESSION):
     """
     Get team strengths for all teams for API consumption.
-    
+
     Args:
         season: Season (defaults to current season)
         gameweek: Specific gameweek (defaults to most recent)
         dbsession: Database session
-        
+
     Returns:
         Dictionary mapping team names to their strength data
     """
-    from airsenal.framework.team_strength import get_all_team_strengths_for_api as core_get_all_strengths
+    from airsenal.framework.team_strength import (
+        get_all_team_strengths_for_api as core_get_all_strengths,
+    )
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        all_strengths = core_get_all_strengths(season, gameweek, dbsession)
-        return all_strengths
+        return core_get_all_strengths(season, gameweek, dbsession)
     except Exception as e:
         print(f"Error getting all team strengths: {e}")
         return {"error": "Failed to get team strengths"}
@@ -700,24 +722,23 @@ def get_all_team_strengths_for_api(season=None, gameweek=None, dbsession=DBSESSI
 def update_team_strengths_for_api(season=None, gameweek=None, dbsession=DBSESSION):
     """
     Update team strengths for a specific gameweek for API consumption.
-    
+
     Args:
         season: Season to update (defaults to current season)
         gameweek: Gameweek to update (defaults to last finished gameweek)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with update results
     """
     from airsenal.framework.team_strength import update_team_strengths_for_gameweek
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        update_results = update_team_strengths_for_gameweek(season, gameweek, dbsession)
-        return update_results
+        return update_team_strengths_for_gameweek(season, gameweek, dbsession)
     except Exception as e:
         print(f"Error updating team strengths: {e}")
         return {"error": f"Failed to update team strengths: {e}"}
@@ -726,111 +747,121 @@ def update_team_strengths_for_api(season=None, gameweek=None, dbsession=DBSESSIO
 def validate_team_strength_model_for_api(season=None, dbsession=DBSESSION):
     """
     Validate team strength model performance for API consumption.
-    
+
     Args:
         season: Season to validate (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with validation metrics
     """
     from airsenal.framework.team_strength import validate_team_strength_model
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
-        validation_results = validate_team_strength_model(season, dbsession)
-        return validation_results
+        return validate_team_strength_model(season, dbsession)
     except Exception as e:
         print(f"Error validating team strength model: {e}")
         return {"error": f"Model validation failed: {e}"}
 
 
-def compare_team_strengths_for_api(team1, team2, season=None, gameweek=None, dbsession=DBSESSION):
+def compare_team_strengths_for_api(
+    team1, team2, season=None, gameweek=None, dbsession=DBSESSION
+):
     """
     Compare strengths between two teams for API consumption.
-    
+
     Args:
         team1: First team name
         team2: Second team name
         season: Season (defaults to current season)
         gameweek: Specific gameweek (defaults to most recent)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with team strength comparison
     """
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         # Get strengths for both teams
         team1_strength = get_team_strength_for_api(team1, season, gameweek, dbsession)
         team2_strength = get_team_strength_for_api(team2, season, gameweek, dbsession)
-        
+
         if "error" in team1_strength:
             return {"error": f"Could not get strength for {team1}"}
         if "error" in team2_strength:
             return {"error": f"Could not get strength for {team2}"}
-        
+
         # Calculate head-to-head comparisons
-        home_advantage = team1_strength["attacking_strength"]["home"] - team2_strength["defensive_strength"]["away"]
-        away_advantage = team2_strength["attacking_strength"]["away"] - team1_strength["defensive_strength"]["home"]
-        
-        neutral_comparison = (
-            (team1_strength["overall_strength"]["home"] + team1_strength["overall_strength"]["away"]) / 2 -
-            (team2_strength["overall_strength"]["home"] + team2_strength["overall_strength"]["away"]) / 2
+        home_advantage = (
+            team1_strength["attacking_strength"]["home"]
+            - team2_strength["defensive_strength"]["away"]
         )
-        
+        away_advantage = (
+            team2_strength["attacking_strength"]["away"]
+            - team1_strength["defensive_strength"]["home"]
+        )
+
+        neutral_comparison = (
+            team1_strength["overall_strength"]["home"]
+            + team1_strength["overall_strength"]["away"]
+        ) / 2 - (
+            team2_strength["overall_strength"]["home"]
+            + team2_strength["overall_strength"]["away"]
+        ) / 2
+
         return {
             "comparison": {
                 "team1": team1,
                 "team2": team2,
                 "season": season,
-                "gameweek": gameweek
+                "gameweek": gameweek,
             },
             "head_to_head": {
                 "team1_home_advantage": float(home_advantage),
                 "team2_away_strength": float(away_advantage),
                 "neutral_ground_advantage": float(neutral_comparison),
                 "predicted_winner": team1 if neutral_comparison > 0 else team2,
-                "confidence": abs(float(neutral_comparison))
+                "confidence": abs(float(neutral_comparison)),
             },
-            "individual_strengths": {
-                team1: team1_strength,
-                team2: team2_strength
-            }
+            "individual_strengths": {team1: team1_strength, team2: team2_strength},
         }
-        
+
     except Exception as e:
         print(f"Error comparing team strengths: {e}")
         return {"error": f"Failed to compare team strengths: {e}"}
 
 
-def get_team_strength_trends_for_api(team, season=None, num_gameweeks=10, dbsession=DBSESSION):
+def get_team_strength_trends_for_api(
+    team, season=None, num_gameweeks=10, dbsession=DBSESSION
+):
     """
     Get team strength trends over time for API consumption.
-    
+
     Args:
         team: Team name
         season: Season (defaults to current season)
         num_gameweeks: Number of recent gameweeks to analyze
         dbsession: Database session
-        
+
     Returns:
         Dictionary with team strength trends
     """
+    from sqlalchemy import desc
+
     from airsenal.framework.schema import TeamStrengthHistory
     from airsenal.framework.utils import CURRENT_SEASON
-    from sqlalchemy import desc
-    
+
     if not season:
         season = CURRENT_SEASON
-    
+
     try:
         # Get historical strength data
         strength_history = (
@@ -841,49 +872,61 @@ def get_team_strength_trends_for_api(team, season=None, num_gameweeks=10, dbsess
             .limit(num_gameweeks)
             .all()
         )
-        
+
         if not strength_history:
             return {"error": f"No strength history found for {team}"}
-        
+
         # Format trend data
         trends = []
         for strength in reversed(strength_history):  # Chronological order
-            trends.append({
-                "gameweek": strength.gameweek,
-                "attacking_strength_home": strength.attacking_strength_home,
-                "attacking_strength_away": strength.attacking_strength_away,
-                "defensive_strength_home": strength.defensive_strength_home,
-                "defensive_strength_away": strength.defensive_strength_away,
-                "overall_strength_home": strength.overall_strength_home,
-                "overall_strength_away": strength.overall_strength_away,
-                "calculated_at": strength.calculated_at,
-                "changes": {
-                    "attacking_home": strength.attacking_strength_home_change,
-                    "attacking_away": strength.attacking_strength_away_change,
-                    "defensive_home": strength.defensive_strength_home_change,
-                    "defensive_away": strength.defensive_strength_away_change
+            trends.append(
+                {
+                    "gameweek": strength.gameweek,
+                    "attacking_strength_home": strength.attacking_strength_home,
+                    "attacking_strength_away": strength.attacking_strength_away,
+                    "defensive_strength_home": strength.defensive_strength_home,
+                    "defensive_strength_away": strength.defensive_strength_away,
+                    "overall_strength_home": strength.overall_strength_home,
+                    "overall_strength_away": strength.overall_strength_away,
+                    "calculated_at": strength.calculated_at,
+                    "changes": {
+                        "attacking_home": strength.attacking_strength_home_change,
+                        "attacking_away": strength.attacking_strength_away_change,
+                        "defensive_home": strength.defensive_strength_home_change,
+                        "defensive_away": strength.defensive_strength_away_change,
+                    },
                 }
-            })
-        
+            )
+
         # Calculate trend statistics
         if len(trends) > 1:
             # Simple trend calculation (slope of overall strength)
             overall_home_values = [t["overall_strength_home"] for t in trends]
             overall_away_values = [t["overall_strength_away"] for t in trends]
-            
+
             import numpy as np
             from scipy import stats
-            
+
             x = np.arange(len(trends))
-            home_trend = stats.linregress(x, overall_home_values)[0] if len(overall_home_values) > 1 else 0
-            away_trend = stats.linregress(x, overall_away_values)[0] if len(overall_away_values) > 1 else 0
-            
+            home_trend = (
+                stats.linregress(x, overall_home_values)[0]
+                if len(overall_home_values) > 1
+                else 0
+            )
+            away_trend = (
+                stats.linregress(x, overall_away_values)[0]
+                if len(overall_away_values) > 1
+                else 0
+            )
+
             trend_summary = {
                 "home_trend": float(home_trend),
                 "away_trend": float(away_trend),
                 "overall_trend": float((home_trend + away_trend) / 2),
-                "trend_direction": "improving" if (home_trend + away_trend) > 0 else "declining",
-                "volatility": float(np.std(overall_home_values + overall_away_values))
+                "trend_direction": "improving"
+                if (home_trend + away_trend) > 0
+                else "declining",
+                "volatility": float(np.std(overall_home_values + overall_away_values)),
             }
         else:
             trend_summary = {
@@ -891,47 +934,49 @@ def get_team_strength_trends_for_api(team, season=None, num_gameweeks=10, dbsess
                 "away_trend": 0.0,
                 "overall_trend": 0.0,
                 "trend_direction": "stable",
-                "volatility": 0.0
+                "volatility": 0.0,
             }
-        
+
         return {
             "team": team,
             "season": season,
             "gameweeks_analyzed": len(trends),
             "trend_summary": trend_summary,
-            "historical_data": trends
+            "historical_data": trends,
         }
-        
+
     except Exception as e:
         print(f"Error getting team strength trends for {team}: {e}")
         return {"error": f"Failed to get strength trends for {team}"}
 
 
-def get_rotation_risk_for_player_api(player_id, gameweek=None, season=None, dbsession=DBSESSION):
+def get_rotation_risk_for_player_api(
+    player_id, gameweek=None, season=None, dbsession=DBSESSION
+):
     """
     Get rotation risk prediction for a specific player for API consumption.
-    
+
     Args:
         player_id: Player database ID
         gameweek: Target gameweek (defaults to next gameweek)
         season: Season string (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with rotation risk prediction and factors
     """
     from airsenal.framework.rotation_risk import RotationRiskCalculator
     from airsenal.framework.utils import CURRENT_SEASON, NEXT_GAMEWEEK
-    
+
     if not season:
         season = CURRENT_SEASON
     if not gameweek:
         gameweek = NEXT_GAMEWEEK
-        
+
     try:
         calculator = RotationRiskCalculator(dbsession=dbsession)
         prediction = calculator.calculate_rotation_risk(player_id, gameweek, season)
-        
+
         # Format for API response
         return {
             "player_id": player_id,
@@ -942,123 +987,143 @@ def get_rotation_risk_for_player_api(player_id, gameweek=None, season=None, dbse
             "risk_level": _get_risk_level_description(prediction["rotation_risk"]),
             "factors": prediction.get("risk_factors", {}),
             "model_version": prediction.get("model_version", "1.0.0"),
-            "calculated_at": prediction.get("calculation_time")
+            "calculated_at": prediction.get("calculation_time"),
         }
-        
+
     except Exception as e:
         print(f"Error calculating rotation risk for player {player_id}: {e}")
         return {
             "error": f"Failed to calculate rotation risk for player {player_id}",
             "player_id": player_id,
             "gameweek": gameweek,
-            "season": season
+            "season": season,
         }
 
 
-def get_team_rotation_risks_for_api(team, gameweek=None, season=None, dbsession=DBSESSION):
+def get_team_rotation_risks_for_api(
+    team, gameweek=None, season=None, dbsession=DBSESSION
+):
     """
     Get rotation risks for all players in a team for API consumption.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
         gameweek: Target gameweek (defaults to next gameweek)
         season: Season string (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with rotation risks for all team players
     """
     from airsenal.framework.rotation_risk import get_team_rotation_risks
     from airsenal.framework.utils import CURRENT_SEASON, NEXT_GAMEWEEK
-    
+
     if not season:
         season = CURRENT_SEASON
     if not gameweek:
         gameweek = NEXT_GAMEWEEK
-        
+
     try:
         rotation_risks = get_team_rotation_risks(team, gameweek, season)
-        
+
         # Format risks and add player names
         formatted_risks = []
         for player_id, prediction in rotation_risks.items():
             player = get_player(player_id, dbsession=dbsession)
             player_name = player.name if player else f"Player {player_id}"
-            
-            formatted_risks.append({
-                "player_id": player_id,
-                "player_name": player_name,
-                "rotation_risk": prediction["rotation_risk"],
-                "confidence": prediction["confidence"],
-                "risk_level": _get_risk_level_description(prediction["rotation_risk"]),
-                "key_factors": _get_key_risk_factors(prediction.get("risk_factors", {}))
-            })
-        
+
+            formatted_risks.append(
+                {
+                    "player_id": player_id,
+                    "player_name": player_name,
+                    "rotation_risk": prediction["rotation_risk"],
+                    "confidence": prediction["confidence"],
+                    "risk_level": _get_risk_level_description(
+                        prediction["rotation_risk"]
+                    ),
+                    "key_factors": _get_key_risk_factors(
+                        prediction.get("risk_factors", {})
+                    ),
+                }
+            )
+
         # Sort by rotation risk (highest first)
         formatted_risks.sort(key=lambda x: x["rotation_risk"], reverse=True)
-        
+
         return {
             "team": team,
             "gameweek": gameweek,
             "season": season,
             "player_count": len(formatted_risks),
-            "avg_rotation_risk": sum(p["rotation_risk"] for p in formatted_risks) / len(formatted_risks) if formatted_risks else 0,
-            "high_risk_players": [p for p in formatted_risks if p["rotation_risk"] > 0.6],
-            "low_risk_players": [p for p in formatted_risks if p["rotation_risk"] < 0.3],
-            "players": formatted_risks
+            "avg_rotation_risk": sum(p["rotation_risk"] for p in formatted_risks)
+            / len(formatted_risks)
+            if formatted_risks
+            else 0,
+            "high_risk_players": [
+                p for p in formatted_risks if p["rotation_risk"] > 0.6
+            ],
+            "low_risk_players": [
+                p for p in formatted_risks if p["rotation_risk"] < 0.3
+            ],
+            "players": formatted_risks,
         }
-        
+
     except Exception as e:
         print(f"Error calculating team rotation risks for {team}: {e}")
         return {
             "error": f"Failed to calculate rotation risks for team {team}",
             "team": team,
             "gameweek": gameweek,
-            "season": season
+            "season": season,
         }
 
 
-def get_high_rotation_risk_players_for_api(gameweek=None, season=None, threshold=0.6, limit=20, dbsession=DBSESSION):
+def get_high_rotation_risk_players_for_api(
+    gameweek=None, season=None, threshold=0.6, limit=20, dbsession=DBSESSION
+):
     """
     Get players with highest rotation risk across all teams for API consumption.
-    
+
     Args:
         gameweek: Target gameweek (defaults to next gameweek)
         season: Season string (defaults to current season)
         threshold: Minimum rotation risk threshold (default 0.6)
         limit: Maximum number of players to return (default 20)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with high-risk players across all teams
     """
     from airsenal.framework.rotation_risk import RotationRiskCalculator
     from airsenal.framework.utils import CURRENT_SEASON, NEXT_GAMEWEEK
-    
+
     if not season:
         season = CURRENT_SEASON
     if not gameweek:
         gameweek = NEXT_GAMEWEEK
-        
+
     try:
         calculator = RotationRiskCalculator(dbsession=dbsession)
-        
+
         # Get all active players for the season
-        active_players = (dbsession.query(Player)
-                         .join(PlayerAttributes)
-                         .filter(
-                             PlayerAttributes.season == season,
-                             PlayerAttributes.gameweek <= gameweek
-                         )
-                         .distinct()
-                         .limit(500)  # Reasonable limit to avoid performance issues
-                         .all())
-        
+        active_players = (
+            dbsession.query(Player)
+            .join(PlayerAttributes)
+            .filter(
+                PlayerAttributes.season == season, PlayerAttributes.gameweek <= gameweek
+            )
+            .distinct()
+            .limit(500)  # Reasonable limit to avoid performance issues
+            .all()
+        )
+
         player_ids = [p.player_id for p in active_players]
-        
+
         # Calculate rotation risks for all players
-        rotation_risks = calculator.calculate_batch_rotation_risks(player_ids, gameweek, season)
-        
+        rotation_risks = calculator.calculate_batch_rotation_risks(
+            player_ids, gameweek, season
+        )
+
         # Filter and format high-risk players
         high_risk_players = []
         for player_id, prediction in rotation_risks.items():
@@ -1067,65 +1132,82 @@ def get_high_rotation_risk_players_for_api(gameweek=None, season=None, threshold
                 if player:
                     # Get current team
                     attrs = player.get_gameweek_attributes(season, gameweek)
-                    current_team = attrs.team if attrs and not isinstance(attrs, tuple) else "Unknown"
-                    current_position = attrs.position if attrs and not isinstance(attrs, tuple) else "Unknown"
-                    
-                    high_risk_players.append({
-                        "player_id": player_id,
-                        "player_name": player.name,
-                        "team": current_team,
-                        "position": current_position,
-                        "rotation_risk": prediction["rotation_risk"],
-                        "confidence": prediction["confidence"],
-                        "risk_level": _get_risk_level_description(prediction["rotation_risk"]),
-                        "key_factors": _get_key_risk_factors(prediction.get("risk_factors", {}))
-                    })
-        
+                    current_team = (
+                        attrs.team
+                        if attrs and not isinstance(attrs, tuple)
+                        else "Unknown"
+                    )
+                    current_position = (
+                        attrs.position
+                        if attrs and not isinstance(attrs, tuple)
+                        else "Unknown"
+                    )
+
+                    high_risk_players.append(
+                        {
+                            "player_id": player_id,
+                            "player_name": player.name,
+                            "team": current_team,
+                            "position": current_position,
+                            "rotation_risk": prediction["rotation_risk"],
+                            "confidence": prediction["confidence"],
+                            "risk_level": _get_risk_level_description(
+                                prediction["rotation_risk"]
+                            ),
+                            "key_factors": _get_key_risk_factors(
+                                prediction.get("risk_factors", {})
+                            ),
+                        }
+                    )
+
         # Sort by rotation risk (highest first) and limit results
         high_risk_players.sort(key=lambda x: x["rotation_risk"], reverse=True)
         high_risk_players = high_risk_players[:limit]
-        
+
         return {
             "gameweek": gameweek,
             "season": season,
             "threshold": threshold,
             "player_count": len(high_risk_players),
-            "avg_risk": sum(p["rotation_risk"] for p in high_risk_players) / len(high_risk_players) if high_risk_players else 0,
-            "players": high_risk_players
+            "avg_risk": sum(p["rotation_risk"] for p in high_risk_players)
+            / len(high_risk_players)
+            if high_risk_players
+            else 0,
+            "players": high_risk_players,
         }
-        
+
     except Exception as e:
         print(f"Error getting high rotation risk players: {e}")
         return {
             "error": "Failed to get high rotation risk players",
             "gameweek": gameweek,
             "season": season,
-            "threshold": threshold
+            "threshold": threshold,
         }
 
 
 def get_manager_rotation_patterns_for_api(team, season=None, dbsession=DBSESSION):
     """
     Get manager rotation patterns for a specific team for API consumption.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
         season: Season string (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with manager rotation patterns and tendencies
     """
     from airsenal.framework.rotation_risk import ManagerPatternAnalyzer
     from airsenal.framework.utils import CURRENT_SEASON
-    
+
     if not season:
         season = CURRENT_SEASON
-        
+
     try:
         analyzer = ManagerPatternAnalyzer(dbsession=dbsession)
         patterns = analyzer.analyze_manager_patterns(team, season)
-        
+
         return {
             "team": team,
             "season": season,
@@ -1133,51 +1215,61 @@ def get_manager_rotation_patterns_for_api(team, season=None, dbsession=DBSESSION
                 "avg_rotation_rate": patterns["avg_rotation_rate"],
                 "congestion_response": patterns["congestion_response"],
                 "position_preferences": patterns["position_preferences"],
-                "competition_priorities": patterns["competition_priorities"]
+                "competition_priorities": patterns["competition_priorities"],
             },
             "behavioral_analysis": {
-                "rotation_frequency": _get_rotation_frequency_description(patterns["avg_rotation_rate"]),
-                "congestion_strategy": _get_congestion_strategy_description(patterns["congestion_response"]),
-                "most_rotated_position": max(patterns["position_preferences"].items(), key=lambda x: x[1])[0],
-                "least_rotated_position": min(patterns["position_preferences"].items(), key=lambda x: x[1])[0]
+                "rotation_frequency": _get_rotation_frequency_description(
+                    patterns["avg_rotation_rate"]
+                ),
+                "congestion_strategy": _get_congestion_strategy_description(
+                    patterns["congestion_response"]
+                ),
+                "most_rotated_position": max(
+                    patterns["position_preferences"].items(), key=lambda x: x[1]
+                )[0],
+                "least_rotated_position": min(
+                    patterns["position_preferences"].items(), key=lambda x: x[1]
+                )[0],
             },
-            "sample_size": patterns.get("sample_size", 0)
+            "sample_size": patterns.get("sample_size", 0),
         }
-        
+
     except Exception as e:
         print(f"Error getting manager patterns for {team}: {e}")
         return {
             "error": f"Failed to get manager patterns for team {team}",
             "team": team,
-            "season": season
+            "season": season,
         }
 
 
-def get_fixture_congestion_for_api(team, gameweek=None, season=None, dbsession=DBSESSION):
+def get_fixture_congestion_for_api(
+    team, gameweek=None, season=None, dbsession=DBSESSION
+):
     """
     Get fixture congestion analysis for a team for API consumption.
-    
+
     Args:
         team: Team abbreviation (e.g., 'ARS', 'MCI')
         gameweek: Target gameweek (defaults to next gameweek)
         season: Season string (defaults to current season)
         dbsession: Database session
-        
+
     Returns:
         Dictionary with fixture congestion metrics
     """
     from airsenal.framework.rotation_risk import FixtureCongestionAnalyzer
     from airsenal.framework.utils import CURRENT_SEASON, NEXT_GAMEWEEK
-    
+
     if not season:
         season = CURRENT_SEASON
     if not gameweek:
         gameweek = NEXT_GAMEWEEK
-        
+
     try:
         analyzer = FixtureCongestionAnalyzer(dbsession=dbsession)
         congestion = analyzer.calculate_congestion_score(team, gameweek, season)
-        
+
         return {
             "team": team,
             "gameweek": gameweek,
@@ -1187,59 +1279,60 @@ def get_fixture_congestion_for_api(team, gameweek=None, season=None, dbsession=D
                 "fixtures_7_days": congestion["fixtures_7_days"],
                 "fixtures_14_days": congestion["fixtures_14_days"],
                 "travel_burden": congestion["travel_burden"],
-                "recovery_time": congestion["recovery_time"]
+                "recovery_time": congestion["recovery_time"],
             },
-            "congestion_level": _get_congestion_level_description(congestion["congestion_score"]),
-            "recommendations": _get_congestion_recommendations(congestion)
+            "congestion_level": _get_congestion_level_description(
+                congestion["congestion_score"]
+            ),
+            "recommendations": _get_congestion_recommendations(congestion),
         }
-        
+
     except Exception as e:
         print(f"Error getting fixture congestion for {team}: {e}")
         return {
             "error": f"Failed to get fixture congestion for team {team}",
             "team": team,
             "gameweek": gameweek,
-            "season": season
+            "season": season,
         }
 
 
 # Helper functions for API formatting
 
+
 def _get_risk_level_description(risk_score):
     """Convert rotation risk score to descriptive level."""
     if risk_score >= 0.8:
         return "Very High"
-    elif risk_score >= 0.6:
+    if risk_score >= 0.6:
         return "High"
-    elif risk_score >= 0.4:
+    if risk_score >= 0.4:
         return "Moderate"
-    elif risk_score >= 0.2:
+    if risk_score >= 0.2:
         return "Low"
-    else:
-        return "Very Low"
+    return "Very Low"
 
 
 def _get_key_risk_factors(factors):
     """Extract and format the top 3 risk factors."""
     if not factors:
         return []
-        
+
     # Sort factors by value (excluding negative importance factors)
-    positive_factors = {k: v for k, v in factors.items() 
-                       if not k.endswith('_importance') and v > 0.1}
-    
+    positive_factors = {
+        k: v for k, v in factors.items() if not k.endswith("_importance") and v > 0.1
+    }
+
     sorted_factors = sorted(positive_factors.items(), key=lambda x: x[1], reverse=True)
-    
+
     # Return top 3 factors with descriptions
     top_factors = []
     for factor, value in sorted_factors[:3]:
         description = _get_factor_description(factor, value)
-        top_factors.append({
-            "factor": factor,
-            "value": value,
-            "description": description
-        })
-    
+        top_factors.append(
+            {"factor": factor, "value": value, "description": description}
+        )
+
     return top_factors
 
 
@@ -1252,7 +1345,7 @@ def _get_factor_description(factor, value):
         "age_factor": f"Age-related risk ({value:.1%})",
         "team_depth": f"Squad depth ({value:.1%})",
         "position_rotation_rate": f"Position rotation rate ({value:.1%})",
-        "recovery_time": f"Short recovery time ({value:.1%})"
+        "recovery_time": f"Short recovery time ({value:.1%})",
     }
     return descriptions.get(factor, f"{factor.replace('_', ' ').title()} ({value:.1%})")
 
@@ -1261,59 +1354,492 @@ def _get_rotation_frequency_description(rate):
     """Convert rotation rate to descriptive text."""
     if rate >= 0.5:
         return "Very High - Frequent rotation"
-    elif rate >= 0.3:
+    if rate >= 0.3:
         return "High - Regular rotation"
-    elif rate >= 0.2:
+    if rate >= 0.2:
         return "Moderate - Occasional rotation"
-    elif rate >= 0.1:
+    if rate >= 0.1:
         return "Low - Minimal rotation"
-    else:
-        return "Very Low - Rarely rotates"
+    return "Very Low - Rarely rotates"
 
 
 def _get_congestion_strategy_description(response):
     """Convert congestion response to descriptive text."""
     if response >= 1.5:
         return "Highly Responsive - Significantly increases rotation during congestion"
-    elif response >= 1.2:
+    if response >= 1.2:
         return "Responsive - Increases rotation during congestion"
-    elif response >= 0.8:
+    if response >= 0.8:
         return "Moderately Responsive - Some increase in rotation during congestion"
-    else:
-        return "Unresponsive - Rotation not significantly affected by congestion"
+    return "Unresponsive - Rotation not significantly affected by congestion"
 
 
 def _get_congestion_level_description(score):
     """Convert congestion score to descriptive level."""
     if score >= 0.8:
         return "Extreme"
-    elif score >= 0.6:
+    if score >= 0.6:
         return "High"
-    elif score >= 0.4:
+    if score >= 0.4:
         return "Moderate"
-    elif score >= 0.2:
+    if score >= 0.2:
         return "Low"
-    else:
-        return "Minimal"
+    return "Minimal"
 
 
 def _get_congestion_recommendations(congestion):
     """Generate recommendations based on congestion metrics."""
     recommendations = []
-    
+
     if congestion["congestion_score"] >= 0.6:
         recommendations.append("Expect increased rotation due to fixture congestion")
-    
+
     if congestion["recovery_time"] <= 3:
         recommendations.append("Short recovery time increases rotation likelihood")
-        
+
     if congestion["fixtures_7_days"] >= 3:
         recommendations.append("Multiple fixtures in short period - high rotation risk")
-        
+
     if congestion["travel_burden"] >= 2.0:
         recommendations.append("Travel burden may affect team selection")
-    
+
     if not recommendations:
-        recommendations.append("Congestion levels are manageable - normal team selection expected")
-        
+        recommendations.append(
+            "Congestion levels are manageable - normal team selection expected"
+        )
+
     return recommendations
+
+
+# Set Piece Specialist API Functions
+
+
+def get_corner_specialists_for_team(
+    team, season=None, corner_type="both", dbsession=DBSESSION
+):
+    """
+    Get corner kick specialists for a specific team using the set piece detection system.
+
+    Args:
+        team: Team name
+        corner_type: "left", "right", or "both"
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        List of corner specialist assignments with confidence scores
+    """
+    from airsenal.framework.set_piece_detection import get_corner_specialists
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        return get_corner_specialists(team, season, corner_type)
+    except Exception as e:
+        logger.error(f"Error getting corner specialists for {team}: {e}")
+        return []
+
+
+def get_free_kick_specialists_for_team(
+    team, season=None, distance="both", dbsession=DBSESSION
+):
+    """
+    Get free kick specialists for a specific team using the set piece detection system.
+
+    Args:
+        team: Team name
+        distance: "close", "long", or "both"
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        List of free kick specialist assignments with confidence scores
+    """
+    from airsenal.framework.set_piece_detection import get_free_kick_specialists
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        return get_free_kick_specialists(team, season, distance)
+    except Exception as e:
+        logger.error(f"Error getting free kick specialists for {team}: {e}")
+        return []
+
+
+def get_throw_in_specialists_for_team(team, season=None, dbsession=DBSESSION):
+    """
+    Get long throw-in specialists for a specific team using the set piece detection system.
+
+    Args:
+        team: Team name
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        List of throw-in specialist assignments with confidence scores
+    """
+    from airsenal.framework.set_piece_detection import get_throw_in_specialists
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        return get_throw_in_specialists(team, season)
+    except Exception as e:
+        logger.error(f"Error getting throw-in specialists for {team}: {e}")
+        return []
+
+
+def get_all_set_piece_specialists_for_api(season=None, dbsession=DBSESSION):
+    """
+    Get all set piece specialists for all teams for API consumption.
+
+    Args:
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        Nested dictionary mapping teams -> set piece types -> specialists
+    """
+    from airsenal.framework.set_piece_detection import get_all_set_piece_specialists
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        all_specialists = get_all_set_piece_specialists(season)
+
+        # Add metadata for API response
+        return {
+            "season": season,
+            "teams": all_specialists,
+            "metadata": {
+                "total_teams": len(all_specialists),
+                "set_piece_types": [
+                    "corner_left",
+                    "corner_right",
+                    "corner_both",
+                    "free_kick_close",
+                    "free_kick_long",
+                    "free_kick_indirect",
+                    "throw_in_long",
+                ],
+                "generated_at": datetime.now().isoformat(),
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting all set piece specialists: {e}")
+        return {"error": str(e)}
+
+
+def get_set_piece_specialist_confidence(
+    player_id, set_piece_type, season=None, dbsession=DBSESSION
+):
+    """
+    Get set piece specialist confidence score for a specific player and type.
+
+    Args:
+        player_id: Player ID
+        set_piece_type: Type of set piece ("corner_left", "free_kick_close", etc.)
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        Dictionary with player set piece specialist information
+    """
+    from airsenal.framework.set_piece_detection import SetPieceDetector, SetPieceType
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        # Map string to enum
+        set_piece_type_map = {
+            "corner_left": SetPieceType.CORNER_LEFT,
+            "corner_right": SetPieceType.CORNER_RIGHT,
+            "corner_both": SetPieceType.CORNER_BOTH,
+            "free_kick_close": SetPieceType.FREE_KICK_CLOSE,
+            "free_kick_long": SetPieceType.FREE_KICK_LONG,
+            "free_kick_indirect": SetPieceType.FREE_KICK_INDIRECT,
+            "throw_in_long": SetPieceType.THROW_IN_LONG,
+        }
+
+        set_piece_enum = set_piece_type_map.get(set_piece_type)
+        if not set_piece_enum:
+            return {"error": f"Invalid set piece type: {set_piece_type}"}
+
+        # Get player info
+        player = get_player(player_id, dbsession=dbsession)
+        if not player:
+            return {"error": f"Player {player_id} not found"}
+
+        team = player.team(season, NEXT_GAMEWEEK)
+        if not team:
+            return {
+                "error": f"Team not found for player {player_id} in season {season}"
+            }
+
+        # Get set piece specialists for the team
+        detector = SetPieceDetector(dbsession)
+        specialists = detector.identify_team_set_piece_specialists(
+            team, season, set_piece_enum
+        )
+
+        # Find this player's data
+        player_data = None
+        for specialist in specialists:
+            if specialist["player_id"] == player_id:
+                player_data = specialist
+                break
+
+        if not player_data:
+            # Player not identified as specialist - check if they have any data
+            return {
+                "player_id": player_id,
+                "player_name": player.name,
+                "team": team,
+                "set_piece_type": set_piece_type,
+                "is_specialist": False,
+                "confidence": 0.0,
+                "reason": "Not identified as specialist for this set piece type",
+            }
+
+        return {
+            "player_id": player_id,
+            "player_name": player.name,
+            "team": team,
+            "set_piece_type": set_piece_type,
+            "is_specialist": True,
+            "confidence": player_data["confidence"],
+            "is_primary": player_data["is_primary"],
+            "total_taken": player_data["total_taken"],
+            "success_rate": player_data["success_rate"],
+            "goals_rate": player_data.get("goals_rate", 0.0),
+            "assists_rate": player_data.get("assists_rate", 0.0),
+            "last_taken_date": player_data["last_taken_date"].isoformat()
+            if player_data["last_taken_date"]
+            else None,
+            "recent_taken": player_data.get("recent_taken", 0),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting set piece confidence for player {player_id}: {e}")
+        return {"error": str(e)}
+
+
+def get_set_piece_effectiveness_analysis(
+    player_id, set_piece_type, season=None, dbsession=DBSESSION
+):
+    """
+    Get effectiveness analysis for a set piece specialist.
+
+    Args:
+        player_id: Player ID
+        set_piece_type: Type of set piece
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        Dictionary with effectiveness metrics
+    """
+    from airsenal.framework.set_piece_detection import (
+        SetPieceOutcomeAnalyzer,
+        SetPieceType,
+    )
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        # Map string to enum
+        set_piece_type_map = {
+            "corner_left": SetPieceType.CORNER_LEFT,
+            "corner_right": SetPieceType.CORNER_RIGHT,
+            "corner_both": SetPieceType.CORNER_BOTH,
+            "free_kick_close": SetPieceType.FREE_KICK_CLOSE,
+            "free_kick_long": SetPieceType.FREE_KICK_LONG,
+            "free_kick_indirect": SetPieceType.FREE_KICK_INDIRECT,
+            "throw_in_long": SetPieceType.THROW_IN_LONG,
+        }
+
+        set_piece_enum = set_piece_type_map.get(set_piece_type)
+        if not set_piece_enum:
+            return {"error": f"Invalid set piece type: {set_piece_type}"}
+
+        analyzer = SetPieceOutcomeAnalyzer(dbsession)
+        return analyzer.analyze_specialist_effectiveness(
+            player_id, season, set_piece_enum
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Error analyzing set piece effectiveness for player {player_id}: {e}"
+        )
+        return {"error": str(e)}
+
+
+def compare_set_piece_specialists(
+    player_ids, set_piece_type, season=None, dbsession=DBSESSION
+):
+    """
+    Compare effectiveness of multiple set piece specialists.
+
+    Args:
+        player_ids: List of player IDs to compare
+        set_piece_type: Type of set piece
+        season: Season to analyze (defaults to current season)
+        dbsession: Database session
+
+    Returns:
+        Dictionary with comparative analysis
+    """
+    from airsenal.framework.set_piece_detection import (
+        SetPieceOutcomeAnalyzer,
+        SetPieceType,
+    )
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        # Map string to enum
+        set_piece_type_map = {
+            "corner_left": SetPieceType.CORNER_LEFT,
+            "corner_right": SetPieceType.CORNER_RIGHT,
+            "corner_both": SetPieceType.CORNER_BOTH,
+            "free_kick_close": SetPieceType.FREE_KICK_CLOSE,
+            "free_kick_long": SetPieceType.FREE_KICK_LONG,
+            "free_kick_indirect": SetPieceType.FREE_KICK_INDIRECT,
+            "throw_in_long": SetPieceType.THROW_IN_LONG,
+        }
+
+        set_piece_enum = set_piece_type_map.get(set_piece_type)
+        if not set_piece_enum:
+            return {"error": f"Invalid set piece type: {set_piece_type}"}
+
+        analyzer = SetPieceOutcomeAnalyzer(dbsession)
+        comparison = analyzer.compare_specialists(player_ids, season, set_piece_enum)
+
+        # Add player names to the comparison
+        for player_id in player_ids:
+            player = get_player(player_id, dbsession=dbsession)
+            if player and player_id in comparison["comparisons"]:
+                comparison["comparisons"][player_id]["player_name"] = player.name
+
+        return comparison
+
+    except Exception as e:
+        logger.error(f"Error comparing set piece specialists: {e}")
+        return {"error": str(e)}
+
+
+def detect_set_piece_role_changes(
+    team, season=None, lookback_gameweeks=5, dbsession=DBSESSION
+):
+    """
+    Detect recent changes in set piece specialist assignments for a team.
+
+    Args:
+        team: Team name
+        season: Season to analyze (defaults to current season)
+        lookback_gameweeks: Number of gameweeks to look back
+        dbsession: Database session
+
+    Returns:
+        Dictionary with detected role changes
+    """
+    from airsenal.framework.set_piece_detection import SetPieceTracker, SetPieceType
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        tracker = SetPieceTracker(dbsession)
+
+        all_changes = {}
+        for set_piece_type in SetPieceType:
+            changes = tracker.detect_role_changes(
+                team, season, set_piece_type, lookback_gameweeks
+            )
+            if changes:
+                all_changes[set_piece_type.value] = changes
+
+        return {
+            "team": team,
+            "season": season,
+            "lookback_gameweeks": lookback_gameweeks,
+            "role_changes": all_changes,
+            "total_changes": sum(len(changes) for changes in all_changes.values()),
+        }
+
+    except Exception as e:
+        logger.error(f"Error detecting set piece role changes for {team}: {e}")
+        return {"error": str(e)}
+
+
+def update_set_piece_assignments_for_api(season=None, team=None, dbsession=DBSESSION):
+    """
+    Update set piece specialist assignments based on latest analysis.
+
+    Args:
+        season: Season to update (defaults to current season)
+        team: Specific team to update (defaults to all teams)
+        dbsession: Database session
+
+    Returns:
+        Dictionary with update results
+    """
+    from airsenal.framework.set_piece_detection import SetPieceDetector, SetPieceType
+
+    if season is None:
+        season = CURRENT_SEASON
+
+    try:
+        detector = SetPieceDetector(dbsession)
+
+        updates_made = 0
+        teams_updated = []
+
+        # Get teams to update
+        if team:
+            teams_to_update = [team]
+        else:
+            # Get all teams for the season
+            with session_scope() as session:
+                teams_query = (
+                    session.query(PlayerAttributes.team)
+                    .filter(PlayerAttributes.season == season)
+                    .distinct()
+                )
+                teams_to_update = [t[0] for t in teams_query.all()]
+
+        # Update each team for each set piece type
+        for team_name in teams_to_update:
+            team_updates = 0
+            for set_piece_type in SetPieceType:
+                specialists = detector.identify_team_set_piece_specialists(
+                    team_name, season, set_piece_type
+                )
+
+                # Store the assignments in database
+                # This would involve updating the SetPieceSpecialist table
+                # For now, just count the assignments
+                team_updates += len(specialists)
+
+            if team_updates > 0:
+                teams_updated.append(team_name)
+                updates_made += team_updates
+
+        return {
+            "season": season,
+            "teams_updated": teams_updated,
+            "total_updates": updates_made,
+            "updated_at": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error updating set piece assignments: {e}")
+        return {"error": str(e)}

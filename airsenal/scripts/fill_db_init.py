@@ -4,11 +4,11 @@ import argparse
 
 from sqlalchemy.orm.session import Session
 
-from airsenal.framework.schema import clean_database, database_is_empty, session_scope
 from airsenal.framework.database_versioning import (
+    create_compatibility_matrix,
     create_initial_database_version,
-    create_compatibility_matrix
 )
+from airsenal.framework.schema import clean_database, database_is_empty, session_scope
 from airsenal.framework.season import CURRENT_SEASON, sort_seasons
 from airsenal.framework.transaction_utils import fill_initial_squad
 from airsenal.framework.utils import get_past_seasons
@@ -54,16 +54,18 @@ def make_init_db(fpl_team_id: int, seasons: list[str], dbsession: Session) -> bo
         create_initial_database_version(
             dbsession=dbsession,
             applied_by="database_initialization",
-            migration_description=f"Initial database setup with seasons: {', '.join(seasons)}"
+            migration_description=f"Initial database setup with seasons: {', '.join(seasons)}",
         )
-        
+
         print("Creating compatibility matrix...")
         create_compatibility_matrix(dbsession)
-        
+
         print("Database version tracking setup complete.")
     except Exception as e:
         print(f"Warning: Could not set up database version tracking: {e}")
-        print("Database initialization completed, but version tracking may not be available.")
+        print(
+            "Database initialization completed, but version tracking may not be available."
+        )
 
     print("DONE!")
     return not database_is_empty(dbsession)

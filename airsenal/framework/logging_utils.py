@@ -8,27 +8,27 @@ predictions, database queries, API calls, and feature engineering.
 import functools
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
-import structlog
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
-from .logging_config import get_logger, set_context, timed
+from .logging_config import get_logger, set_context
 
 
 class PredictionLogger:
     """Logger specialized for ML prediction operations."""
-    
+
     def __init__(self, logger_name: str = "airsenal.predictions"):
         self.logger = get_logger(logger_name)
-    
+
     def log_prediction_start(
         self,
         model_name: str,
-        player_ids: List[int],
+        player_ids: list[int],
         gameweek_range: tuple,
-        features: Optional[Dict[str, Any]] = None,
+        features: dict[str, Any] | None = None,
     ) -> None:
         """Log the start of a prediction operation."""
         self.logger.info(
@@ -39,16 +39,16 @@ class PredictionLogger:
             gameweek_range=gameweek_range,
             features=list(features.keys()) if features else None,
         )
-    
+
     def log_prediction_result(
         self,
         model_name: str,
         player_id: int,
         gameweek: int,
         predicted_points: float,
-        confidence: Optional[float] = None,
-        features_used: Optional[List[str]] = None,
-        execution_time: Optional[float] = None,
+        confidence: float | None = None,
+        features_used: list[str] | None = None,
+        execution_time: float | None = None,
     ) -> None:
         """Log individual prediction results."""
         log_data = {
@@ -58,16 +58,16 @@ class PredictionLogger:
             "gameweek": gameweek,
             "predicted_points": predicted_points,
         }
-        
+
         if confidence is not None:
             log_data["confidence"] = confidence
         if features_used:
             log_data["features_used"] = features_used
         if execution_time is not None:
             log_data["execution_time"] = execution_time
-        
+
         self.logger.info("Prediction completed", **log_data)
-    
+
     def log_prediction_batch_summary(
         self,
         model_name: str,
@@ -85,15 +85,17 @@ class PredictionLogger:
             total_predictions=total_predictions,
             successful_predictions=successful_predictions,
             failed_predictions=failed_predictions,
-            success_rate=successful_predictions / total_predictions if total_predictions > 0 else 0,
+            success_rate=successful_predictions / total_predictions
+            if total_predictions > 0
+            else 0,
             total_time=total_time,
             avg_prediction_time=avg_prediction_time,
         )
-    
+
     def log_model_performance(
         self,
         model_name: str,
-        metrics: Dict[str, float],
+        metrics: dict[str, float],
         validation_period: tuple,
         player_count: int,
     ) -> None:
@@ -110,10 +112,10 @@ class PredictionLogger:
 
 class FeatureLogger:
     """Logger specialized for feature engineering operations."""
-    
+
     def __init__(self, logger_name: str = "airsenal.features"):
         self.logger = get_logger(logger_name)
-    
+
     def log_feature_computation(
         self,
         feature_name: str,
@@ -121,7 +123,7 @@ class FeatureLogger:
         entity_id: int,
         value: Any,
         computation_time: float,
-        data_sources: Optional[List[str]] = None,
+        data_sources: list[str] | None = None,
     ) -> None:
         """Log feature computation."""
         self.logger.info(
@@ -134,7 +136,7 @@ class FeatureLogger:
             computation_time=computation_time,
             data_sources=data_sources,
         )
-    
+
     def log_feature_validation_error(
         self,
         feature_name: str,
@@ -155,11 +157,11 @@ class FeatureLogger:
             actual_type=actual_type,
             value=value,
         )
-    
+
     def log_feature_store_operation(
         self,
         operation: str,
-        feature_names: List[str],
+        feature_names: list[str],
         entity_count: int,
         cache_hits: int,
         cache_misses: int,
@@ -174,28 +176,35 @@ class FeatureLogger:
             entity_count=entity_count,
             cache_hits=cache_hits,
             cache_misses=cache_misses,
-            cache_hit_rate=cache_hits / (cache_hits + cache_misses) if (cache_hits + cache_misses) > 0 else 0,
+            cache_hit_rate=cache_hits / (cache_hits + cache_misses)
+            if (cache_hits + cache_misses) > 0
+            else 0,
             execution_time=execution_time,
         )
 
 
 class DatabaseLogger:
     """Logger for database operations."""
-    
+
     def __init__(self, logger_name: str = "airsenal.database"):
         self.logger = get_logger(logger_name)
         self._setup_sqlalchemy_logging()
-    
+
     def _setup_sqlalchemy_logging(self) -> None:
         """Set up SQLAlchemy event listeners for query logging."""
+
         @event.listens_for(Engine, "before_cursor_execute")
-        def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        def before_cursor_execute(
+            conn, cursor, statement, parameters, context, executemany
+        ):
             context._query_start_time = time.time()
-        
+
         @event.listens_for(Engine, "after_cursor_execute")
-        def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        def after_cursor_execute(
+            conn, cursor, statement, parameters, context, executemany
+        ):
             total = time.time() - context._query_start_time
-            
+
             # Only log slow queries by default (> 1 second)
             threshold = float(os.getenv("AIRSENAL_SLOW_QUERY_THRESHOLD", "1.0"))
             if total > threshold:
@@ -203,17 +212,21 @@ class DatabaseLogger:
                     "Slow query detected",
                     event_type="slow_query",
                     execution_time=total,
-                    statement=statement[:500] + "..." if len(statement) > 500 else statement,
-                    parameters=str(parameters)[:200] + "..." if len(str(parameters)) > 200 else str(parameters),
+                    statement=statement[:500] + "..."
+                    if len(statement) > 500
+                    else statement,
+                    parameters=str(parameters)[:200] + "..."
+                    if len(str(parameters)) > 200
+                    else str(parameters),
                 )
-    
+
     def log_query(
         self,
         operation: str,
         table: str,
         execution_time: float,
-        row_count: Optional[int] = None,
-        filters: Optional[Dict[str, Any]] = None,
+        row_count: int | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> None:
         """Log database query operations."""
         log_data = {
@@ -222,21 +235,21 @@ class DatabaseLogger:
             "table": table,
             "execution_time": execution_time,
         }
-        
+
         if row_count is not None:
             log_data["row_count"] = row_count
         if filters:
             log_data["filters"] = filters
-        
+
         self.logger.info("Database query executed", **log_data)
-    
+
     def log_bulk_operation(
         self,
         operation: str,
         table: str,
         record_count: int,
         execution_time: float,
-        batch_size: Optional[int] = None,
+        batch_size: int | None = None,
     ) -> None:
         """Log bulk database operations."""
         self.logger.info(
@@ -252,10 +265,10 @@ class DatabaseLogger:
 
 class APILogger:
     """Logger for external API calls."""
-    
+
     def __init__(self, logger_name: str = "airsenal.api"):
         self.logger = get_logger(logger_name)
-    
+
     def log_api_call(
         self,
         service: str,
@@ -263,9 +276,9 @@ class APILogger:
         method: str,
         status_code: int,
         response_time: float,
-        request_size: Optional[int] = None,
-        response_size: Optional[int] = None,
-        rate_limit_remaining: Optional[int] = None,
+        request_size: int | None = None,
+        response_size: int | None = None,
+        rate_limit_remaining: int | None = None,
     ) -> None:
         """Log external API calls."""
         log_data = {
@@ -276,17 +289,17 @@ class APILogger:
             "status_code": status_code,
             "response_time": response_time,
         }
-        
+
         if request_size is not None:
             log_data["request_size"] = request_size
         if response_size is not None:
             log_data["response_size"] = response_size
         if rate_limit_remaining is not None:
             log_data["rate_limit_remaining"] = rate_limit_remaining
-        
+
         level = "error" if status_code >= 400 else "info"
         getattr(self.logger, level)("API call completed", **log_data)
-    
+
     def log_api_error(
         self,
         service: str,
@@ -309,15 +322,15 @@ class APILogger:
 
 class OptimizationLogger:
     """Logger for optimization operations."""
-    
+
     def __init__(self, logger_name: str = "airsenal.optimization"):
         self.logger = get_logger(logger_name)
-    
+
     def log_optimization_start(
         self,
         optimization_type: str,
-        parameters: Dict[str, Any],
-        constraints: Dict[str, Any],
+        parameters: dict[str, Any],
+        constraints: dict[str, Any],
     ) -> None:
         """Log the start of an optimization operation."""
         self.logger.info(
@@ -327,14 +340,14 @@ class OptimizationLogger:
             parameters=parameters,
             constraints=constraints,
         )
-    
+
     def log_optimization_progress(
         self,
         optimization_type: str,
         generation: int,
         best_score: float,
         population_size: int,
-        convergence_metric: Optional[float] = None,
+        convergence_metric: float | None = None,
     ) -> None:
         """Log optimization progress."""
         log_data = {
@@ -344,19 +357,19 @@ class OptimizationLogger:
             "best_score": best_score,
             "population_size": population_size,
         }
-        
+
         if convergence_metric is not None:
             log_data["convergence_metric"] = convergence_metric
-        
+
         self.logger.info("Optimization progress", **log_data)
-    
+
     def log_optimization_result(
         self,
         optimization_type: str,
         final_score: float,
         total_generations: int,
         execution_time: float,
-        solution: Dict[str, Any],
+        solution: dict[str, Any],
     ) -> None:
         """Log optimization results."""
         self.logger.info(
@@ -375,31 +388,31 @@ def log_prediction(
     model_name: str,
     include_inputs: bool = True,
     include_outputs: bool = True,
-    logger: Optional[PredictionLogger] = None,
+    logger: PredictionLogger | None = None,
 ) -> Callable:
     """
     Decorator for prediction functions.
-    
+
     Args:
         model_name: Name of the prediction model
         include_inputs: Whether to log input parameters
         include_outputs: Whether to log prediction outputs
         logger: PredictionLogger instance to use
-        
+
     Returns:
         Decorator function
     """
     if logger is None:
         logger = PredictionLogger()
-    
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # Set context for this prediction
             set_context(model_name=model_name, operation="prediction")
-            
+
             try:
                 if include_inputs:
                     logger.logger.info(
@@ -409,11 +422,11 @@ def log_prediction(
                         args_count=len(args),
                         kwargs_keys=list(kwargs.keys()),
                     )
-                
+
                 result = func(*args, **kwargs)
-                
+
                 execution_time = time.time() - start_time
-                
+
                 if include_outputs:
                     logger.logger.info(
                         "Prediction function completed",
@@ -422,9 +435,9 @@ def log_prediction(
                         execution_time=execution_time,
                         result_type=type(result).__name__,
                     )
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
                 logger.logger.error(
@@ -436,48 +449,53 @@ def log_prediction(
                     error_type=type(e).__name__,
                 )
                 raise
-        
+
         return wrapper
+
     return decorator
 
 
 def log_feature_computation(
     feature_name: str,
     entity_type: str = "player",
-    logger: Optional[FeatureLogger] = None,
+    logger: FeatureLogger | None = None,
 ) -> Callable:
     """
     Decorator for feature computation functions.
-    
+
     Args:
         feature_name: Name of the feature being computed
         entity_type: Type of entity (player, team, etc.)
         logger: FeatureLogger instance to use
-        
+
     Returns:
         Decorator function
     """
     if logger is None:
         logger = FeatureLogger()
-    
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # Set context for this feature computation
-            set_context(feature_name=feature_name, entity_type=entity_type, operation="feature_computation")
-            
+            set_context(
+                feature_name=feature_name,
+                entity_type=entity_type,
+                operation="feature_computation",
+            )
+
             try:
                 result = func(*args, **kwargs)
                 execution_time = time.time() - start_time
-                
+
                 # Log successful computation
                 if hasattr(result, "__len__") and not isinstance(result, str):
                     result_size = len(result)
                 else:
                     result_size = 1
-                
+
                 logger.logger.info(
                     "Feature computation completed",
                     event_type="feature_computation_success",
@@ -487,9 +505,9 @@ def log_feature_computation(
                     execution_time=execution_time,
                     result_size=result_size,
                 )
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
                 logger.logger.error(
@@ -503,58 +521,59 @@ def log_feature_computation(
                     error_type=type(e).__name__,
                 )
                 raise
-        
+
         return wrapper
+
     return decorator
 
 
 def log_database_operation(
     operation: str,
     table: str,
-    logger: Optional[DatabaseLogger] = None,
+    logger: DatabaseLogger | None = None,
 ) -> Callable:
     """
     Decorator for database operations.
-    
+
     Args:
         operation: Type of database operation (select, insert, update, delete)
         table: Database table name
         logger: DatabaseLogger instance to use
-        
+
     Returns:
         Decorator function
     """
     if logger is None:
         logger = DatabaseLogger()
-    
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # Set context for this database operation
             set_context(operation=operation, table=table, operation_type="database")
-            
+
             try:
                 result = func(*args, **kwargs)
                 execution_time = time.time() - start_time
-                
+
                 # Try to determine row count from result
                 row_count = None
                 if hasattr(result, "rowcount"):
                     row_count = result.rowcount
                 elif hasattr(result, "__len__") and not isinstance(result, str):
                     row_count = len(result)
-                
+
                 logger.log_query(
                     operation=operation,
                     table=table,
                     execution_time=execution_time,
                     row_count=row_count,
                 )
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
                 logger.logger.error(
@@ -568,49 +587,50 @@ def log_database_operation(
                     error_type=type(e).__name__,
                 )
                 raise
-        
+
         return wrapper
+
     return decorator
 
 
 def log_api_call(
     service: str,
     endpoint: str,
-    logger: Optional[APILogger] = None,
+    logger: APILogger | None = None,
 ) -> Callable:
     """
     Decorator for API calls.
-    
+
     Args:
         service: Name of the external service
         endpoint: API endpoint being called
         logger: APILogger instance to use
-        
+
     Returns:
         Decorator function
     """
     if logger is None:
         logger = APILogger()
-    
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # Set context for this API call
             set_context(service=service, endpoint=endpoint, operation="api_call")
-            
+
             try:
                 result = func(*args, **kwargs)
                 execution_time = time.time() - start_time
-                
+
                 # Extract status code if available
                 status_code = 200  # Default success
                 if hasattr(result, "status_code"):
                     status_code = result.status_code
                 elif isinstance(result, dict) and "status_code" in result:
                     status_code = result["status_code"]
-                
+
                 logger.log_api_call(
                     service=service,
                     endpoint=endpoint,
@@ -618,9 +638,9 @@ def log_api_call(
                     status_code=status_code,
                     response_time=execution_time,
                 )
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
                 logger.log_api_error(
@@ -631,8 +651,9 @@ def log_api_call(
                     will_retry=False,
                 )
                 raise
-        
+
         return wrapper
+
     return decorator
 
 
@@ -645,18 +666,18 @@ optimization_logger = OptimizationLogger()
 
 # Export main classes and functions
 __all__ = [
-    "PredictionLogger",
-    "FeatureLogger",
-    "DatabaseLogger",
     "APILogger",
+    "DatabaseLogger",
+    "FeatureLogger",
     "OptimizationLogger",
-    "log_prediction",
-    "log_feature_computation",
-    "log_database_operation",
-    "log_api_call",
-    "prediction_logger",
-    "feature_logger",
-    "database_logger",
+    "PredictionLogger",
     "api_logger",
+    "database_logger",
+    "feature_logger",
+    "log_api_call",
+    "log_database_operation",
+    "log_feature_computation",
+    "log_prediction",
     "optimization_logger",
+    "prediction_logger",
 ]

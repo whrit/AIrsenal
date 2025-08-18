@@ -2,7 +2,7 @@
 Redis Caching Layer for AIrsenal
 
 High-performance Redis-based caching system for frequently accessed predictions,
-computed features, and expensive database queries. Supports both single Redis 
+computed features, and expensive database queries. Supports both single Redis
 instances and Redis clusters with comprehensive fallback mechanisms.
 
 Key Features:
@@ -17,7 +17,7 @@ Key Features:
 Usage:
     # Initialize Redis cache
     redis_cache = RedisCache()
-    
+
     # Cache predictions
     redis_cache.set_prediction_cache(
         player_id=123,
@@ -25,14 +25,14 @@ Usage:
         season="2425",
         predictions=predictions_array
     )
-    
+
     # Retrieve cached data
     cached_data = redis_cache.get_prediction_cache(
         player_id=123,
         gameweek=10,
         season="2425"
     )
-    
+
     # Use caching decorators
     @redis_cache.cache_feature(ttl=1800)
     def compute_rolling_average(player_id, window=5):
@@ -60,6 +60,7 @@ try:
     from redis.cluster import RedisCluster
     from redis.connection import ConnectionPool
     from redis.sentinel import Sentinel
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
@@ -70,6 +71,7 @@ except ImportError:
 
 try:
     import zstandard as zstd
+
     ZSTD_AVAILABLE = True
 except ImportError:
     ZSTD_AVAILABLE = False
@@ -77,6 +79,7 @@ except ImportError:
 
 try:
     import orjson
+
     ORJSON_AVAILABLE = True
 except ImportError:
     ORJSON_AVAILABLE = False
@@ -102,6 +105,7 @@ logger = logging.getLogger(__name__)
 
 class CompressionType(Enum):
     """Available compression algorithms."""
+
     NONE = "none"
     ZSTD = "zstd"
     GZIP = "gzip"
@@ -109,6 +113,7 @@ class CompressionType(Enum):
 
 class CacheKeyType(Enum):
     """Cache key type prefixes for hierarchical organization."""
+
     PREDICTION = "pred"
     FEATURE = "feat"
     QUERY = "query"
@@ -119,6 +124,7 @@ class CacheKeyType(Enum):
 @dataclass
 class CacheMetrics:
     """Redis cache performance metrics."""
+
     hits: int = 0
     misses: int = 0
     sets: int = 0
@@ -144,10 +150,14 @@ class CircuitBreaker:
         """Execute function with circuit breaker protection."""
         with self._lock:
             if self.state == "OPEN":
-                if self.last_failure_time is not None and time.time() - self.last_failure_time > self.recovery_timeout:
+                if (
+                    self.last_failure_time is not None
+                    and time.time() - self.last_failure_time > self.recovery_timeout
+                ):
                     self.state = "HALF_OPEN"
                 else:
-                    raise Exception("Circuit breaker is OPEN")
+                    msg = "Circuit breaker is OPEN"
+                    raise Exception(msg)
 
             try:
                 result = func(*args, **kwargs)
@@ -178,6 +188,7 @@ class RedisSerializer:
             self._decompressor = zstd.ZstdDecompressor()
         elif compression == CompressionType.GZIP:
             import gzip
+
             self._compress_func = gzip.compress
             self._decompress_func = gzip.decompress
 
@@ -189,7 +200,7 @@ class RedisSerializer:
                 serialized = self._serialize_numpy(data)
             elif isinstance(data, pd.DataFrame):
                 serialized = self._serialize_dataframe(data)
-            elif isinstance(data, (dict, list)) and ORJSON_AVAILABLE:
+            elif isinstance(data, dict | list) and ORJSON_AVAILABLE:
                 serialized = orjson.dumps(data)
             else:
                 serialized = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
@@ -202,7 +213,7 @@ class RedisSerializer:
             return serialized
 
         except Exception as e:
-            logger.error(f"Serialization error: {e}")
+            logger.error("Serialization error: %s", e)
             raise
 
     def deserialize(self, data: bytes) -> Any:
@@ -246,38 +257,43 @@ class RedisSerializer:
             return decompressed
 
         except Exception as e:
-            logger.error(f"Deserialization error: {e}")
+            logger.error("Deserialization error: %s", e)
             raise
 
     def _serialize_numpy(self, array: np.ndarray) -> bytes:
         """Efficient NumPy array serialization."""
-        return pickle.dumps({
-            'type': 'numpy',
-            'data': array.tobytes(),
-            'dtype': str(array.dtype),
-            'shape': array.shape
-        }, protocol=pickle.HIGHEST_PROTOCOL)
+        return pickle.dumps(
+            {
+                "type": "numpy",
+                "data": array.tobytes(),
+                "dtype": str(array.dtype),
+                "shape": array.shape,
+            },
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
 
     def _deserialize_numpy(self, data: bytes) -> np.ndarray:
         """Efficient NumPy array deserialization."""
         obj = pickle.loads(data)
-        if obj.get('type') == 'numpy':
-            return np.frombuffer(obj['data'], dtype=obj['dtype']).reshape(obj['shape'])
-        raise ValueError("Not a numpy array")
+        if obj.get("type") == "numpy":
+            return np.frombuffer(obj["data"], dtype=obj["dtype"]).reshape(obj["shape"])
+        msg = "Not a numpy array"
+        raise ValueError(msg)
 
     def _serialize_dataframe(self, df: pd.DataFrame) -> bytes:
         """Efficient DataFrame serialization using parquet format."""
-        return pickle.dumps({
-            'type': 'dataframe',
-            'data': df.to_parquet()
-        }, protocol=pickle.HIGHEST_PROTOCOL)
+        return pickle.dumps(
+            {"type": "dataframe", "data": df.to_parquet()},
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
 
     def _deserialize_dataframe(self, data: bytes) -> pd.DataFrame:
         """Efficient DataFrame deserialization from parquet format."""
         obj = pickle.loads(data)
-        if obj.get('type') == 'dataframe':
-            return pd.read_parquet(obj['data'])
-        raise ValueError("Not a DataFrame")
+        if obj.get("type") == "dataframe":
+            return pd.read_parquet(obj["data"])
+        msg = "Not a DataFrame"
+        raise ValueError(msg)
 
 
 class RedisCacheKeyBuilder:
@@ -293,13 +309,13 @@ class RedisCacheKeyBuilder:
         primary_id: str | int,
         secondary_id: str | int | None = None,
         context: dict[str, Any] | None = None,
-        feature_name: str | None = None
+        feature_name: str | None = None,
     ) -> str:
         """
         Build hierarchical cache key.
-        
+
         Format: namespace:version:type:primary[:secondary][:context_hash][:feature]
-        
+
         Examples:
         - airsenal:v1:pred:player:123:gw10:season2425
         - airsenal:v1:feat:rolling_goals_5:123:gw10
@@ -325,7 +341,8 @@ class RedisCacheKeyBuilder:
         """Parse cache key back into components."""
         parts = key.split(":")
         if len(parts) < 4:
-            raise ValueError(f"Invalid cache key format: {key}")
+            msg = f"Invalid cache key format: {key}"
+            raise ValueError(msg)
 
         parsed: dict[str, str | None] = {
             "namespace": parts[0],
@@ -377,7 +394,7 @@ class RedisConnectionManager:
                 return True
 
             except Exception as e:
-                logger.error(f"Failed to initialize Redis connection: {e}")
+                logger.error("Failed to initialize Redis connection: %s", e)
                 return False
 
     def _init_single(self):
@@ -398,10 +415,12 @@ class RedisConnectionManager:
     def _init_cluster(self):
         """Initialize Redis cluster."""
         if not AIRSENAL_REDIS_CLUSTER_NODES:
-            raise ValueError("Redis cluster nodes not specified")
+            msg = "Redis cluster nodes not specified"
+            raise ValueError(msg)
 
         # Parse cluster nodes
         from redis.cluster import ClusterNode
+
         nodes = []
         for node in AIRSENAL_REDIS_CLUSTER_NODES.split(","):
             host, port = node.strip().split(":")
@@ -427,12 +446,13 @@ class RedisConnectionManager:
     def get_connection(self):
         """Get Redis connection with circuit breaker protection."""
         if not self._initialized:
-            raise Exception("Redis connection not initialized")
+            msg = "Redis connection not initialized"
+            raise Exception(msg)
 
         try:
             yield self.circuit_breaker.call(lambda: self.client)
         except Exception as e:
-            logger.error(f"Redis connection error: {e}")
+            logger.error("Redis connection error: %s", e)
             raise
 
     def is_available(self) -> bool:
@@ -443,7 +463,7 @@ class RedisConnectionManager:
 class RedisCache:
     """
     High-performance Redis caching layer for AIrsenal.
-    
+
     Provides comprehensive caching functionality with:
     - Hierarchical key management
     - Efficient serialization/compression
@@ -456,7 +476,7 @@ class RedisCache:
         self,
         namespace: str = "airsenal",
         version: str = "v1",
-        default_ttl: int | None = None
+        default_ttl: int | None = None,
     ):
         self.namespace = namespace
         self.version = version
@@ -472,7 +492,9 @@ class RedisCache:
             "gzip": CompressionType.GZIP,
             "none": CompressionType.NONE,
         }
-        compression = compression_map.get(AIRSENAL_REDIS_COMPRESSION, CompressionType.ZSTD)
+        compression = compression_map.get(
+            AIRSENAL_REDIS_COMPRESSION, CompressionType.ZSTD
+        )
         self.serializer = RedisSerializer(compression)
 
         # Metrics tracking
@@ -508,7 +530,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache get error for key {key}: {e}")
+            logger.error("Cache get error for key %s: %s", key, e)
             return None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> bool:
@@ -529,7 +551,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache set error for key {key}: {e}")
+            logger.error("Cache set error for key %s: %s", key, e)
             return False
 
     def delete(self, key: str) -> bool:
@@ -546,7 +568,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache delete error for key {key}: {e}")
+            logger.error("Cache delete error for key %s: %s", key, e)
             return False
 
     def delete_pattern(self, pattern: str) -> int:
@@ -557,17 +579,14 @@ class RedisCache:
         try:
             with self.connection_manager.get_connection() as conn:
                 keys = conn.keys(pattern)
-                if keys:
-                    count = conn.delete(*keys)
-                else:
-                    count = 0
+                count = conn.delete(*keys) if keys else 0
 
             self._record_delete(count)
             return count
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache delete pattern error for pattern {pattern}: {e}")
+            logger.error("Cache delete pattern error for pattern %s: %s", pattern, e)
             return 0
 
     def exists(self, key: str) -> bool:
@@ -581,7 +600,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache exists error for key {key}: {e}")
+            logger.error("Cache exists error for key %s: %s", key, e)
             return False
 
     def expire(self, key: str, ttl: int) -> bool:
@@ -595,17 +614,13 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache expire error for key {key}: {e}")
+            logger.error("Cache expire error for key %s: %s", key, e)
             return False
 
     # High-level cache operations for AIrsenal
 
     def get_prediction_cache(
-        self,
-        player_id: int,
-        gameweek: int,
-        season: str,
-        model_version: str = "latest"
+        self, player_id: int, gameweek: int, season: str, model_version: str = "latest"
     ) -> np.ndarray | None:
         """Get cached player predictions."""
         key = self.key_builder.build_key(
@@ -614,8 +629,8 @@ class RedisCache:
             context={
                 "gameweek": gameweek,
                 "season": season,
-                "model_version": model_version
-            }
+                "model_version": model_version,
+            },
         )
         return self.get(key)
 
@@ -626,7 +641,7 @@ class RedisCache:
         season: str,
         predictions: np.ndarray,
         model_version: str = "latest",
-        ttl: int | None = None
+        ttl: int | None = None,
     ) -> bool:
         """Cache player predictions."""
         key = self.key_builder.build_key(
@@ -635,8 +650,8 @@ class RedisCache:
             context={
                 "gameweek": gameweek,
                 "season": season,
-                "model_version": model_version
-            }
+                "model_version": model_version,
+            },
         )
         # Predictions are typically valid until next gameweek
         cache_ttl = ttl or (7 * 24 * 3600)  # 7 days
@@ -647,14 +662,14 @@ class RedisCache:
         feature_name: str,
         entity_type: str,
         entity_id: int,
-        context: dict[str, Any] | None = None
+        context: dict[str, Any] | None = None,
     ) -> Any | None:
         """Get cached feature value."""
         key = self.key_builder.build_key(
             key_type=CacheKeyType.FEATURE,
             primary_id=f"{entity_type}:{entity_id}",
             context=context,
-            feature_name=feature_name
+            feature_name=feature_name,
         )
         return self.get(key)
 
@@ -665,29 +680,33 @@ class RedisCache:
         entity_id: int,
         value: Any,
         context: dict[str, Any] | None = None,
-        ttl: int | None = None
+        ttl: int | None = None,
     ) -> bool:
         """Cache feature value."""
         key = self.key_builder.build_key(
             key_type=CacheKeyType.FEATURE,
             primary_id=f"{entity_type}:{entity_id}",
             context=context,
-            feature_name=feature_name
+            feature_name=feature_name,
         )
         return self.set(key, value, ttl)
 
     def invalidate_player_cache(self, player_id: int) -> int:
         """Invalidate all cache entries for a player."""
-        pattern = self.key_builder.build_key(
-            key_type=CacheKeyType.PREDICTION,
-            primary_id=f"player:{player_id}"
-        ) + "*"
+        pattern = (
+            self.key_builder.build_key(
+                key_type=CacheKeyType.PREDICTION, primary_id=f"player:{player_id}"
+            )
+            + "*"
+        )
         pred_count = self.delete_pattern(pattern)
 
-        pattern = self.key_builder.build_key(
-            key_type=CacheKeyType.FEATURE,
-            primary_id=f"player:{player_id}"
-        ) + "*"
+        pattern = (
+            self.key_builder.build_key(
+                key_type=CacheKeyType.FEATURE, primary_id=f"player:{player_id}"
+            )
+            + "*"
+        )
         feat_count = self.delete_pattern(pattern)
 
         return pred_count + feat_count
@@ -710,7 +729,7 @@ class RedisCache:
 
                     keys_to_delete = []
                     for key in keys:
-                        key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                        key_str = key.decode("utf-8") if isinstance(key, bytes) else key
                         if f"season{season}" in key_str and f"gw{gameweek}" in key_str:
                             keys_to_delete.append(key)
 
@@ -721,7 +740,7 @@ class RedisCache:
                         break
 
         except Exception as e:
-            logger.error(f"Error invalidating gameweek cache: {e}")
+            logger.error("Error invalidating gameweek cache: %s", e)
 
         return deleted
 
@@ -747,7 +766,7 @@ class RedisCache:
                         results.append(value)
                         self._record_hit()
                     except Exception as e:
-                        logger.error(f"Deserialization error in mget: {e}")
+                        logger.error("Deserialization error in mget: %s", e)
                         results.append(None)
                         self._record_error()
 
@@ -755,7 +774,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache mget error: {e}")
+            logger.error("Cache mget error: %s", e)
             return [None] * len(keys)
 
     def mset(self, key_value_pairs: dict[str, Any], ttl: int | None = None) -> bool:
@@ -789,7 +808,7 @@ class RedisCache:
 
         except Exception as e:
             self._record_error()
-            logger.error(f"Cache mset error: {e}")
+            logger.error("Cache mset error: %s", e)
             return False
 
     # Cache warming strategies
@@ -799,7 +818,7 @@ class RedisCache:
         player_ids: list[int],
         gameweeks: list[int],
         season: str,
-        prediction_func: Callable
+        prediction_func: Callable,
     ) -> int:
         """Warm cache with predictions for specified players and gameweeks."""
         if not self.is_available():
@@ -820,15 +839,23 @@ class RedisCache:
                     if predictions is not None:
                         # Cache with extended TTL for warming
                         if self.set_prediction_cache(
-                            player_id, gameweek, season, predictions,
-                            ttl=self.default_ttl * 2
+                            player_id,
+                            gameweek,
+                            season,
+                            predictions,
+                            ttl=self.default_ttl * 2,
                         ):
                             warmed_count += 1
 
                 except Exception as e:
-                    logger.error(f"Error warming prediction cache for player {player_id}, GW {gameweek}: {e}")
+                    logger.error(
+                        "Error warming prediction cache for player %s, GW %s: %s",
+                        player_id,
+                        gameweek,
+                        e,
+                    )
 
-        logger.info(f"Warmed {warmed_count} prediction cache entries")
+        logger.info("Warmed %s prediction cache entries", warmed_count)
         return warmed_count
 
     def warm_features_cache(
@@ -836,7 +863,7 @@ class RedisCache:
         feature_names: list[str],
         entity_type: str,
         entity_ids: list[int],
-        compute_func: Callable
+        compute_func: Callable,
     ) -> int:
         """Warm cache with features for specified entities."""
         if not self.is_available():
@@ -857,25 +884,31 @@ class RedisCache:
                     if feature_value is not None:
                         # Cache with extended TTL for warming
                         if self.set_feature_cache(
-                            feature_name, entity_type, entity_id, feature_value,
-                            ttl=self.default_ttl * 2
+                            feature_name,
+                            entity_type,
+                            entity_id,
+                            feature_value,
+                            ttl=self.default_ttl * 2,
                         ):
                             warmed_count += 1
 
                 except Exception as e:
-                    logger.error(f"Error warming feature cache for {feature_name}, {entity_type}:{entity_id}: {e}")
+                    logger.error(
+                        "Error warming feature cache for %s, %s:%s: %s",
+                        feature_name,
+                        entity_type,
+                        entity_id,
+                        e,
+                    )
 
-        logger.info(f"Warmed {warmed_count} feature cache entries")
+        logger.info("Warmed %s feature cache entries", warmed_count)
         return warmed_count
 
     # Caching decorators
 
-    def cache_feature(
-        self,
-        ttl: int | None = None,
-        key_func: Callable | None = None
-    ):
+    def cache_feature(self, ttl: int | None = None, key_func: Callable | None = None):
         """Decorator for caching feature computation functions."""
+
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -901,14 +934,12 @@ class RedisCache:
                 return result
 
             return wrapper
+
         return decorator
 
-    def cache_query(
-        self,
-        ttl: int | None = None,
-        key_prefix: str = "query"
-    ):
+    def cache_query(self, ttl: int | None = None, key_prefix: str = "query"):
         """Decorator for caching database query results."""
+
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -932,6 +963,7 @@ class RedisCache:
                 return result
 
             return wrapper
+
         return decorator
 
     # Monitoring and metrics
@@ -944,9 +976,9 @@ class RedisCache:
                 # Update running average
                 total_requests = self.metrics.hits + self.metrics.misses
                 self.metrics.avg_retrieval_time_ms = (
-                    (self.metrics.avg_retrieval_time_ms * (total_requests - 1) +
-                     retrieval_time * 1000) / total_requests
-                )
+                    self.metrics.avg_retrieval_time_ms * (total_requests - 1)
+                    + retrieval_time * 1000
+                ) / total_requests
 
     def _record_miss(self):
         """Record cache miss."""
@@ -1013,7 +1045,7 @@ class RedisCache:
                 }
 
         except Exception as e:
-            logger.error(f"Error getting Redis info: {e}")
+            logger.error("Error getting Redis info: %s", e)
             return {"error": str(e)}
 
     def flush_all(self) -> bool:
@@ -1029,7 +1061,7 @@ class RedisCache:
             return True
 
         except Exception as e:
-            logger.error(f"Error flushing cache: {e}")
+            logger.error("Error flushing cache: %s", e)
             return False
 
 

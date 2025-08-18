@@ -12,10 +12,6 @@ import pandas as pd
 from scipy.stats import multinomial
 from sqlalchemy.orm.session import Session
 
-# Import structured logging
-from airsenal.framework.logging_config import get_logger, set_correlation_id, set_context
-from airsenal.framework.logging_utils import log_prediction, prediction_logger, timed
-
 from airsenal.framework.FPL_scoring_rules import (
     get_appearance_points,
     points_for_assist,
@@ -25,6 +21,13 @@ from airsenal.framework.FPL_scoring_rules import (
     points_for_yellow_card,
     saves_for_point,
 )
+
+# Import structured logging
+from airsenal.framework.logging_config import (
+    set_context,
+    set_correlation_id,
+)
+from airsenal.framework.logging_utils import log_prediction, prediction_logger, timed
 from airsenal.framework.player_model import (
     ConjugatePlayerModel,
     NumpyroPlayerModel,
@@ -325,7 +328,9 @@ def get_card_points(player_id: int, minutes: int | float, df_cards: pd.Series) -
     return 0
 
 
-@log_prediction(model_name="team_player_model", include_inputs=True, include_outputs=True)
+@log_prediction(
+    model_name="team_player_model", include_inputs=True, include_outputs=True
+)
 @timed(operation="calc_predicted_points_for_player", threshold=1.0)
 def calc_predicted_points_for_player(
     player: Player | str | int,
@@ -348,9 +353,10 @@ def calc_predicted_points_for_player(
     """
     # Set correlation ID for this prediction if not already set
     from airsenal.framework.logging_config import get_correlation_id
+
     if not get_correlation_id():
         set_correlation_id()
-    
+
     if isinstance(player, str | int):
         p = get_player(player, dbsession=dbsession)
         if p is None:
@@ -366,19 +372,14 @@ def calc_predicted_points_for_player(
         player = p
 
     # Set context for this prediction
-    set_context(
-        player_id=player.id,
-        player_name=player.name,
-        season=season,
-        tag=tag
-    )
+    set_context(player_id=player.id, player_name=player.name, season=season, tag=tag)
 
     prediction_logger.logger.info(
         "Starting player prediction",
         player_id=player.id,
         player_name=player.name,
         season=season,
-        event_type="prediction_start"
+        event_type="prediction_start",
     )
 
     if not gw_range:
@@ -408,10 +409,10 @@ def calc_predicted_points_for_player(
             position=position,
             team=team,
             error=msg,
-            event_type="prediction_validation_error"
+            event_type="prediction_validation_error",
         )
         raise ValueError(msg)
-    
+
     prediction_logger.logger.info(
         "Player validation completed",
         player_id=player.id,
@@ -419,7 +420,7 @@ def calc_predicted_points_for_player(
         position=position,
         gameweek_range=gw_range,
         fixtures_behind=fixtures_behind,
-        event_type="prediction_setup"
+        event_type="prediction_setup",
     )
     fixtures = get_fixtures_for_player(
         player, season, gw_range=gw_range, dbsession=dbsession

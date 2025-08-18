@@ -6,14 +6,13 @@ to create more meaningful test scenarios that mirror real-world FPL data.
 """
 
 import random
-from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
 # Premier League teams for 2024/25 season with abbreviations
 PREMIER_LEAGUE_TEAMS = {
     "ARS": "Arsenal",
-    "AVL": "Aston Villa", 
+    "AVL": "Aston Villa",
     "BOU": "AFC Bournemouth",
     "BRE": "Brentford",
     "BHA": "Brighton & Hove Albion",
@@ -37,113 +36,298 @@ PREMIER_LEAGUE_TEAMS = {
 # Realistic player names categorized by position
 REALISTIC_PLAYERS = {
     "GK": [
-        "Aaron Ramsdale", "Alisson Becker", "Andre Onana", "Bernd Leno",
-        "David Raya", "Dean Henderson", "Ederson", "Emiliano Martinez",
-        "Fraser Forster", "Guglielmo Vicario", "James Trafford", "Jason Steele",
-        "Jordan Pickford", "Jose Sa", "Kepa Arrizabalaga", "Lukasz Fabianski",
-        "Mark Flekken", "Matz Sels", "Nick Pope", "Neto Santos",
-        "Robert Sanchez", "Sam Johnstone", "Thiago Silva", "Thomas Kaminski",
-        "Tim Krul", "Vicente Guaita", "Wes Foderingham", "Alphonse Areola",
+        "Aaron Ramsdale",
+        "Alisson Becker",
+        "Andre Onana",
+        "Bernd Leno",
+        "David Raya",
+        "Dean Henderson",
+        "Ederson",
+        "Emiliano Martinez",
+        "Fraser Forster",
+        "Guglielmo Vicario",
+        "James Trafford",
+        "Jason Steele",
+        "Jordan Pickford",
+        "Jose Sa",
+        "Kepa Arrizabalaga",
+        "Lukasz Fabianski",
+        "Mark Flekken",
+        "Matz Sels",
+        "Nick Pope",
+        "Neto Santos",
+        "Robert Sanchez",
+        "Sam Johnstone",
+        "Thiago Silva",
+        "Thomas Kaminski",
+        "Tim Krul",
+        "Vicente Guaita",
+        "Wes Foderingham",
+        "Alphonse Areola",
     ],
     "DEF": [
         # Arsenal
-        "William Saliba", "Gabriel Magalhaes", "Ben White", "Jurrien Timber",
-        "Takehiro Tomiyasu", "Kieran Tierney", "Oleksandr Zinchenko",
+        "William Saliba",
+        "Gabriel Magalhaes",
+        "Ben White",
+        "Jurrien Timber",
+        "Takehiro Tomiyasu",
+        "Kieran Tierney",
+        "Oleksandr Zinchenko",
         # Liverpool
-        "Virgil van Dijk", "Ibrahima Konate", "Joe Gomez", "Andrew Robertson",
-        "Trent Alexander-Arnold", "Kostas Tsimikas", "Jarell Quansah",
+        "Virgil van Dijk",
+        "Ibrahima Konate",
+        "Joe Gomez",
+        "Andrew Robertson",
+        "Trent Alexander-Arnold",
+        "Kostas Tsimikas",
+        "Jarell Quansah",
         # Manchester City
-        "Ruben Dias", "John Stones", "Nathan Ake", "Josko Gvardiol",
-        "Kyle Walker", "Rico Lewis", "Manuel Akanji",
+        "Ruben Dias",
+        "John Stones",
+        "Nathan Ake",
+        "Josko Gvardiol",
+        "Kyle Walker",
+        "Rico Lewis",
+        "Manuel Akanji",
         # Chelsea
-        "Thiago Silva", "Wesley Fofana", "Benoit Badiashile", "Levi Colwill",
-        "Reece James", "Ben Chilwell", "Marc Cucurella", "Malo Gusto",
+        "Thiago Silva",
+        "Wesley Fofana",
+        "Benoit Badiashile",
+        "Levi Colwill",
+        "Reece James",
+        "Ben Chilwell",
+        "Marc Cucurella",
+        "Malo Gusto",
         # Newcastle
-        "Sven Botman", "Fabian Schar", "Dan Burn", "Kieran Trippier",
-        "Tino Livramento", "Lewis Hall", "Emil Krafth",
+        "Sven Botman",
+        "Fabian Schar",
+        "Dan Burn",
+        "Kieran Trippier",
+        "Tino Livramento",
+        "Lewis Hall",
+        "Emil Krafth",
         # Tottenham
-        "Cristian Romero", "Micky van de Ven", "Pedro Porro", "Destiny Udogie",
-        "Radu Dragusin", "Ben Davies", "Djed Spence",
+        "Cristian Romero",
+        "Micky van de Ven",
+        "Pedro Porro",
+        "Destiny Udogie",
+        "Radu Dragusin",
+        "Ben Davies",
+        "Djed Spence",
         # Manchester United
-        "Lisandro Martinez", "Raphael Varane", "Harry Maguire", "Luke Shaw",
-        "Diogo Dalot", "Aaron Wan-Bissaka", "Tyrell Malacia",
+        "Lisandro Martinez",
+        "Raphael Varane",
+        "Harry Maguire",
+        "Luke Shaw",
+        "Diogo Dalot",
+        "Aaron Wan-Bissaka",
+        "Tyrell Malacia",
         # Aston Villa
-        "Ezri Konsa", "Pau Torres", "Diego Carlos", "Lucas Digne",
-        "Matty Cash", "Alex Moreno",
+        "Ezri Konsa",
+        "Pau Torres",
+        "Diego Carlos",
+        "Lucas Digne",
+        "Matty Cash",
+        "Alex Moreno",
         # Brighton
-        "Lewis Dunk", "Joel Veltman", "Jan Paul van Hecke", "Pervis Estupinan",
-        "Tariq Lamptey", "Igor Julio", "Adam Webster",
+        "Lewis Dunk",
+        "Joel Veltman",
+        "Jan Paul van Hecke",
+        "Pervis Estupinan",
+        "Tariq Lamptey",
+        "Igor Julio",
+        "Adam Webster",
         # West Ham
-        "Kurt Zouma", "Nayef Aguerd", "Vladimir Coufal", "Aaron Cresswell",
-        "Emerson Palmieri", "Ben Johnson",
+        "Kurt Zouma",
+        "Nayef Aguerd",
+        "Vladimir Coufal",
+        "Aaron Cresswell",
+        "Emerson Palmieri",
+        "Ben Johnson",
         # Others
-        "James Tarkowski", "Jarrad Branthwaite", "Nathan Collins", "Max Kilman",
-        "Craig Dawson", "Joachim Andersen", "Marc Guehi", "Tyrick Mitchell",
-        "Joel Ward", "Nathaniel Clyne", "Ryan Manning", "Rayan Ait-Nouri",
+        "James Tarkowski",
+        "Jarrad Branthwaite",
+        "Nathan Collins",
+        "Max Kilman",
+        "Craig Dawson",
+        "Joachim Andersen",
+        "Marc Guehi",
+        "Tyrick Mitchell",
+        "Joel Ward",
+        "Nathaniel Clyne",
+        "Ryan Manning",
+        "Rayan Ait-Nouri",
     ],
     "MID": [
         # Arsenal
-        "Martin Odegaard", "Declan Rice", "Kai Havertz", "Thomas Partey",
-        "Jorginho", "Mikel Merino", "Emile Smith Rowe", "Fabio Vieira",
+        "Martin Odegaard",
+        "Declan Rice",
+        "Kai Havertz",
+        "Thomas Partey",
+        "Jorginho",
+        "Mikel Merino",
+        "Emile Smith Rowe",
+        "Fabio Vieira",
         # Liverpool
-        "Mohamed Salah", "Luis Diaz", "Dominik Szoboszlai", "Alexis Mac Allister",
-        "Curtis Jones", "Ryan Gravenberch", "Wataru Endo", "Harvey Elliott",
+        "Mohamed Salah",
+        "Luis Diaz",
+        "Dominik Szoboszlai",
+        "Alexis Mac Allister",
+        "Curtis Jones",
+        "Ryan Gravenberch",
+        "Wataru Endo",
+        "Harvey Elliott",
         # Manchester City
-        "Kevin De Bruyne", "Bernardo Silva", "Phil Foden", "Ilkay Gundogan",
-        "Mateo Kovacic", "Jeremy Doku", "Jack Grealish", "Matheus Nunes",
+        "Kevin De Bruyne",
+        "Bernardo Silva",
+        "Phil Foden",
+        "Ilkay Gundogan",
+        "Mateo Kovacic",
+        "Jeremy Doku",
+        "Jack Grealish",
+        "Matheus Nunes",
         # Chelsea
-        "Enzo Fernandez", "Moises Caicedo", "Conor Gallagher", "Christopher Nkunku",
-        "Cole Palmer", "Raheem Sterling", "Mykhailo Mudryk", "Carney Chukwuemeka",
+        "Enzo Fernandez",
+        "Moises Caicedo",
+        "Conor Gallagher",
+        "Christopher Nkunku",
+        "Cole Palmer",
+        "Raheem Sterling",
+        "Mykhailo Mudryk",
+        "Carney Chukwuemeka",
         # Tottenham
-        "James Maddison", "Dejan Kulusevski", "Pape Matar Sarr", "Yves Bissouma",
-        "Rodrigo Bentancur", "Brennan Johnson", "Manor Solomon",
+        "James Maddison",
+        "Dejan Kulusevski",
+        "Pape Matar Sarr",
+        "Yves Bissouma",
+        "Rodrigo Bentancur",
+        "Brennan Johnson",
+        "Manor Solomon",
         # Manchester United
-        "Bruno Fernandes", "Casemiro", "Christian Eriksen", "Mason Mount",
-        "Kobbie Mainoo", "Scott McTominay", "Antony", "Marcus Rashford",
+        "Bruno Fernandes",
+        "Casemiro",
+        "Christian Eriksen",
+        "Mason Mount",
+        "Kobbie Mainoo",
+        "Scott McTominay",
+        "Antony",
+        "Marcus Rashford",
         # Newcastle
-        "Bruno Guimaraes", "Sandro Tonali", "Joelinton", "Alexander Isak",
-        "Anthony Gordon", "Harvey Barnes", "Sean Longstaff", "Elliot Anderson",
+        "Bruno Guimaraes",
+        "Sandro Tonali",
+        "Joelinton",
+        "Alexander Isak",
+        "Anthony Gordon",
+        "Harvey Barnes",
+        "Sean Longstaff",
+        "Elliot Anderson",
         # Aston Villa
-        "John McGinn", "Douglas Luiz", "Boubacar Kamara", "Leon Bailey",
-        "Jacob Ramsey", "Moussa Diaby", "Youri Tielemans", "Morgan Rogers",
+        "John McGinn",
+        "Douglas Luiz",
+        "Boubacar Kamara",
+        "Leon Bailey",
+        "Jacob Ramsey",
+        "Moussa Diaby",
+        "Youri Tielemans",
+        "Morgan Rogers",
         # Brighton
-        "Pascal Gross", "Kaoru Mitoma", "Simon Adingra", "Carlos Baleba",
-        "Billy Gilmour", "Adam Lallana", "Facundo Buonanotte", "Julio Enciso",
+        "Pascal Gross",
+        "Kaoru Mitoma",
+        "Simon Adingra",
+        "Carlos Baleba",
+        "Billy Gilmour",
+        "Adam Lallana",
+        "Facundo Buonanotte",
+        "Julio Enciso",
         # West Ham
-        "Jarrod Bowen", "Lucas Paqueta", "Tomas Soucek", "James Ward-Prowse",
-        "Mohammed Kudus", "Pablo Fornals", "Said Benrahma", "Flynn Downes",
+        "Jarrod Bowen",
+        "Lucas Paqueta",
+        "Tomas Soucek",
+        "James Ward-Prowse",
+        "Mohammed Kudus",
+        "Pablo Fornals",
+        "Said Benrahma",
+        "Flynn Downes",
         # Others
-        "Abdoulaye Doucoure", "Amadou Onana", "James Garner", "Dwight McNeil",
-        "Jack Harrison", "Idrissa Gueye", "Vitinho", "Andreas Pereira",
-        "Alex Iwobi", "Tom Cairney", "Harrison Reed", "Timothy Castagne",
-        "Wilfred Ndidi", "Kiernan Dewsbury-Hall", "Abdul Fatawu", "Stephy Mavididi",
+        "Abdoulaye Doucoure",
+        "Amadou Onana",
+        "James Garner",
+        "Dwight McNeil",
+        "Jack Harrison",
+        "Idrissa Gueye",
+        "Vitinho",
+        "Andreas Pereira",
+        "Alex Iwobi",
+        "Tom Cairney",
+        "Harrison Reed",
+        "Timothy Castagne",
+        "Wilfred Ndidi",
+        "Kiernan Dewsbury-Hall",
+        "Abdul Fatawu",
+        "Stephy Mavididi",
     ],
     "FWD": [
         # Top-tier forwards
-        "Erling Haaland", "Darwin Nunez", "Gabriel Jesus", "Alexander Isak",
-        "Ivan Toney", "Ollie Watkins", "Dominic Solanke", "Richarlison",
-        "Nicolas Jackson", "Callum Wilson", "Danny Welbeck", "Michail Antonio",
+        "Erling Haaland",
+        "Darwin Nunez",
+        "Gabriel Jesus",
+        "Alexander Isak",
+        "Ivan Toney",
+        "Ollie Watkins",
+        "Dominic Solanke",
+        "Richarlison",
+        "Nicolas Jackson",
+        "Callum Wilson",
+        "Danny Welbeck",
+        "Michail Antonio",
         # Mid-tier forwards
-        "Evan Ferguson", "Jamie Vardy", "Matheus Cunha", "Jean-Philippe Mateta",
-        "Beto", "Rodrigo Muniz", "Cameron Archer", "Liam Delap",
-        "Chris Wood", "Jhon Duran", "Adam Armstrong", "Ben Brereton Diaz",
+        "Evan Ferguson",
+        "Jamie Vardy",
+        "Matheus Cunha",
+        "Jean-Philippe Mateta",
+        "Beto",
+        "Rodrigo Muniz",
+        "Cameron Archer",
+        "Liam Delap",
+        "Chris Wood",
+        "Jhon Duran",
+        "Adam Armstrong",
+        "Ben Brereton Diaz",
         # Emerging/Squad forwards
-        "Elijah Adebayo", "Yoane Wissa", "Neal Maupay", "Armando Broja",
-        "Anthony Martial", "Folarin Balogun", "Eddie Nketiah", "Diogo Jota",
-        "Luis Suarez", "Cody Gakpo", "Roberto Firmino", "Gabriel Martinelli",
-        "Brennan Johnson", "Morgan Gibbs-White", "Eberechi Eze", "Wilfried Zaha",
-        "Carlton Morris", "Troy Deeney", "Ashley Barnes", "Che Adams",
-    ]
+        "Elijah Adebayo",
+        "Yoane Wissa",
+        "Neal Maupay",
+        "Armando Broja",
+        "Anthony Martial",
+        "Folarin Balogun",
+        "Eddie Nketiah",
+        "Diogo Jota",
+        "Luis Suarez",
+        "Cody Gakpo",
+        "Roberto Firmino",
+        "Gabriel Martinelli",
+        "Brennan Johnson",
+        "Morgan Gibbs-White",
+        "Eberechi Eze",
+        "Wilfried Zaha",
+        "Carlton Morris",
+        "Troy Deeney",
+        "Ashley Barnes",
+        "Che Adams",
+    ],
 }
+
 
 @dataclass
 class StatisticalDistribution:
     """Statistical distribution parameters for realistic data generation."""
+
     mean: float
     std: float
     min_val: float = 0.0
     max_val: float = None
-    
+
     def generate(self) -> float:
         """Generate a random value from this distribution."""
         value = random.gauss(self.mean, self.std)
@@ -152,11 +336,13 @@ class StatisticalDistribution:
             value = min(value, self.max_val)
         return round(value, 2)
 
+
 class Position(Enum):
     GK = "GK"
-    DEF = "DEF" 
+    DEF = "DEF"
     MID = "MID"
     FWD = "FWD"
+
 
 # Realistic statistical distributions by position for new PlayerAttributes fields
 STATISTICAL_DISTRIBUTIONS = {
@@ -231,21 +417,27 @@ STATISTICAL_DISTRIBUTIONS = {
         "interceptions_per_90": StatisticalDistribution(0.4, 0.3, 0.0, 1.5),
         "clearances_per_90": StatisticalDistribution(0.2, 0.2, 0.0, 1.0),
         "price_range": (50, 150),  # FWD prices (highest range)
-    }
+    },
 }
 
 # Fixture difficulty ratings for different team matchups
 FIXTURE_DIFFICULTY_MATRIX = {
     # Top 6 teams are generally more difficult
-    ("ARS", "LIV"): 4.5, ("ARS", "MCI"): 5.0, ("ARS", "CHE"): 4.0,
-    ("LIV", "MCI"): 4.8, ("LIV", "CHE"): 4.2, ("MCI", "CHE"): 4.3,
-    
+    ("ARS", "LIV"): 4.5,
+    ("ARS", "MCI"): 5.0,
+    ("ARS", "CHE"): 4.0,
+    ("LIV", "MCI"): 4.8,
+    ("LIV", "CHE"): 4.2,
+    ("MCI", "CHE"): 4.3,
     # Mid-table teams
-    ("AVL", "NEW"): 3.2, ("BHA", "WHU"): 3.0, ("FUL", "BOU"): 2.8,
-    
+    ("AVL", "NEW"): 3.2,
+    ("BHA", "WHU"): 3.0,
+    ("FUL", "BOU"): 2.8,
     # Newly promoted/relegation candidates
-    ("IPS", "SOU"): 2.5, ("LEI", "NFO"): 2.7,
+    ("IPS", "SOU"): 2.5,
+    ("LEI", "NFO"): 2.7,
 }
+
 
 def get_realistic_player_name(position: str) -> str:
     """Get a random realistic player name for the given position."""
@@ -253,53 +445,60 @@ def get_realistic_player_name(position: str) -> str:
         position = "MID"  # Default fallback
     return random.choice(REALISTIC_PLAYERS[position])
 
-def get_random_team() -> Tuple[str, str]:
+
+def get_random_team() -> tuple[str, str]:
     """Get a random team code and full name."""
     team_code = random.choice(list(PREMIER_LEAGUE_TEAMS.keys()))
     return team_code, PREMIER_LEAGUE_TEAMS[team_code]
 
-def get_position_stats(position: str) -> Dict[str, float]:
+
+def get_position_stats(position: str) -> dict[str, float]:
     """Generate realistic statistics for a player in the given position."""
     if position not in STATISTICAL_DISTRIBUTIONS:
         position = "MID"  # Default fallback
-    
+
     position_stats = STATISTICAL_DISTRIBUTIONS[position]
     stats = {}
-    
+
     for stat_name, distribution in position_stats.items():
         if stat_name == "price_range":
             continue  # Handle separately
         stats[stat_name] = distribution.generate()
-    
+
     return stats
 
-def get_position_price_range(position: str) -> Tuple[int, int]:
+
+def get_position_price_range(position: str) -> tuple[int, int]:
     """Get realistic price range for a player position."""
     if position not in STATISTICAL_DISTRIBUTIONS:
         position = "MID"
     return STATISTICAL_DISTRIBUTIONS[position]["price_range"]
 
-def generate_realistic_price(position: str, form_3_games: float = None) -> int:
+
+def generate_realistic_price(position: str, form_3_games: float | None = None) -> int:
     """Generate a realistic price based on position and form."""
     price_range = get_position_price_range(position)
     base_price = random.randint(price_range[0], price_range[1])
-    
+
     # Adjust price based on form if provided
     if form_3_games is not None:
         if form_3_games > 7.0:  # High form
             base_price += random.randint(5, 15)
         elif form_3_games < 3.0:  # Poor form
             base_price -= random.randint(5, 10)
-    
+
     # Ensure price stays within reasonable bounds
     return max(price_range[0], min(price_range[1] + 20, base_price))
 
-def get_fixture_difficulty(home_team: str, away_team: str, home_advantage: bool = True) -> float:
+
+def get_fixture_difficulty(
+    home_team: str, away_team: str, home_advantage: bool = True
+) -> float:
     """Calculate fixture difficulty rating between two teams."""
     # Check if we have a specific rating for this matchup
     matchup = (home_team, away_team)
     reverse_matchup = (away_team, home_team)
-    
+
     if matchup in FIXTURE_DIFFICULTY_MATRIX:
         base_difficulty = FIXTURE_DIFFICULTY_MATRIX[matchup]
     elif reverse_matchup in FIXTURE_DIFFICULTY_MATRIX:
@@ -307,42 +506,45 @@ def get_fixture_difficulty(home_team: str, away_team: str, home_advantage: bool 
     else:
         # Generate based on team "strength" (simplified approach)
         top_6 = ["ARS", "LIV", "MCI", "CHE", "TOT", "MUN"]
-        
+
         home_strength = 4.5 if home_team in top_6 else 3.0
         away_strength = 4.0 if away_team in top_6 else 2.8
-        
+
         base_difficulty = (home_strength + away_strength) / 2
-    
+
     # Apply home advantage
     if home_advantage:
         base_difficulty *= 0.9  # Slightly easier at home
-    
+
     # Add some randomness
     base_difficulty += random.uniform(-0.3, 0.3)
-    
+
     return max(1.0, min(5.0, round(base_difficulty, 1)))
 
-def generate_season_gameweek() -> Tuple[str, int]:
+
+def generate_season_gameweek() -> tuple[str, int]:
     """Generate a realistic season and gameweek combination."""
     seasons = ["2324", "2425", "2526"]  # Current and upcoming seasons
     season = random.choice(seasons)
     gameweek = random.randint(1, 38)
     return season, gameweek
 
-def generate_form_progression(base_form: float, num_weeks: int = 10) -> List[float]:
+
+def generate_form_progression(base_form: float, num_weeks: int = 10) -> list[float]:
     """Generate a realistic form progression over multiple gameweeks."""
     progression = [base_form]
-    
+
     for _ in range(num_weeks - 1):
         # Form tends to regress to mean (5.0) with some randomness
         change = random.uniform(-1.5, 1.5)
         trend_to_mean = (5.0 - progression[-1]) * 0.1
-        
+
         new_form = progression[-1] + change + trend_to_mean
         new_form = max(0.0, min(15.0, new_form))
         progression.append(round(new_form, 1))
-    
+
     return progression
+
 
 # Role probability distributions
 ROLE_PROBABILITIES = {
@@ -368,32 +570,36 @@ ROLE_PROBABILITIES = {
     },
 }
 
-def get_player_roles(position: str) -> Dict[str, bool]:
+
+def get_player_roles(position: str) -> dict[str, bool]:
     """Generate realistic player role assignments based on position."""
     if position not in ROLE_PROBABILITIES:
         position = "MID"
-    
+
     probs = ROLE_PROBABILITIES[position]
     return {
         "is_penalty_taker": random.random() < probs["is_penalty_taker"],
-        "is_free_kick_taker": random.random() < probs["is_free_kick_taker"], 
+        "is_free_kick_taker": random.random() < probs["is_free_kick_taker"],
         "is_corner_taker": random.random() < probs["is_corner_taker"],
     }
 
+
 # Utility function to get all data for a realistic player
-def generate_realistic_player_data(position: str = None, team: str = None) -> Dict:
+def generate_realistic_player_data(
+    position: str | None = None, team: str | None = None
+) -> dict:
     """Generate a complete set of realistic data for a player."""
     if position is None:
         position = random.choice(list(Position)).value
-    
+
     if team is None:
         team, _ = get_random_team()
-    
+
     # Get basic stats and roles
     stats = get_position_stats(position)
     roles = get_player_roles(position)
     season, gameweek = generate_season_gameweek()
-    
+
     # Calculate role confidence based on roles
     role_count = sum(roles.values())
     if role_count > 0:
@@ -402,9 +608,9 @@ def generate_realistic_player_data(position: str = None, team: str = None) -> Di
         role_confidence = max(0.0, min(1.0, base_confidence + confidence_noise))
     else:
         role_confidence = random.uniform(0.0, 0.3)
-    
+
     stats["role_confidence"] = round(role_confidence, 2)
-    
+
     return {
         "name": get_realistic_player_name(position),
         "position": position,

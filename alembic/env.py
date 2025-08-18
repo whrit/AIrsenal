@@ -1,12 +1,10 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-
-from alembic import context
 
 # Import AIrsenal schema and database configuration
 from airsenal.framework.schema import Base, get_connection_string
+from alembic import context
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -63,7 +61,7 @@ def run_migrations_online() -> None:
     """
     # Use AIrsenal's dynamic database configuration
     from sqlalchemy import create_engine
-    
+
     # Create engine with AIrsenal's connection string
     connectable = create_engine(
         get_connection_string(),
@@ -72,7 +70,7 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, 
+            connection=connection,
             target_metadata=target_metadata,
             compare_type=True,  # Enable type comparison for better migrations
             compare_server_default=True,  # Compare server defaults

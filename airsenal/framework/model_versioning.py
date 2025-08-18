@@ -98,7 +98,8 @@ class ModelArtifactManager:
     def serialize_jax_model(self, model: NumpyroPlayerModel) -> dict[str, Any]:
         """Serialize JAX/NumPyro model to dictionary"""
         if model.samples is None or model.player_ids is None:
-            raise ModelStorageError("Model must be fitted before serialization")
+            msg = "Model must be fitted before serialization"
+            raise ModelStorageError(msg)
 
         # Convert JAX arrays to numpy for serialization
         serialized_samples = {}
@@ -133,14 +134,19 @@ class ModelArtifactManager:
     def serialize_conjugate_model(self, model: ConjugatePlayerModel) -> dict[str, Any]:
         """Serialize conjugate player model to dictionary"""
         if model.player_ids is None:
-            raise ModelStorageError("Model must be fitted before serialization")
+            msg = "Model must be fitted before serialization"
+            raise ModelStorageError(msg)
 
         return {
             "model_type": "ConjugatePlayerModel",
             "player_ids": np.array(model.player_ids),
             "prior": np.array(model.prior) if model.prior is not None else None,
-            "posterior": np.array(model.posterior) if model.posterior is not None else None,
-            "mean_probabilities": np.array(model.mean_probabilities) if model.mean_probabilities is not None else None,
+            "posterior": np.array(model.posterior)
+            if model.posterior is not None
+            else None,
+            "mean_probabilities": np.array(model.mean_probabilities)
+            if model.mean_probabilities is not None
+            else None,
         }
 
     def deserialize_conjugate_model(self, data: dict[str, Any]) -> ConjugatePlayerModel:
@@ -162,7 +168,7 @@ class ModelArtifactManager:
         return {
             "model_type": type(model).__name__,
             "model_data": model,
-            "serialization_method": "pickle"
+            "serialization_method": "pickle",
         }
 
     def deserialize_model(self, data: dict[str, Any]) -> Any:
@@ -195,7 +201,7 @@ class ModelArtifactManager:
 
         # Save to file
         try:
-            with open(file_path, 'wb') as f:
+            with open(file_path, "wb") as f:
                 pickle.dump(model_data, f)
 
             # Calculate checksum
@@ -216,42 +222,48 @@ class ModelArtifactManager:
             dbsession.add(artifact)
             dbsession.commit()
 
-            logger.info(f"Saved model artifact {artifact_type} for version {version_id}")
+            logger.info(
+                f"Saved model artifact {artifact_type} for version {version_id}"
+            )
             return artifact
 
         except Exception as e:
             logger.error(f"Failed to save artifact: {e}")
             if file_path.exists():
                 file_path.unlink()  # Clean up partial file
-            raise ModelStorageError(f"Failed to save model artifact: {e}")
+            msg = f"Failed to save model artifact: {e}"
+            raise ModelStorageError(msg)
 
     def load_artifact(self, artifact: ModelArtifact) -> Any:
         """Load model artifact from storage"""
         file_path = Path(artifact.file_path)
 
         if not file_path.exists():
-            raise ModelStorageError(f"Artifact file not found: {file_path}")
+            msg = f"Artifact file not found: {file_path}"
+            raise ModelStorageError(msg)
 
         # Verify checksum if available
         if artifact.checksum:
             current_checksum = self._calculate_checksum(file_path)
             if current_checksum != artifact.checksum:
-                raise ModelStorageError(f"Checksum mismatch for artifact {artifact.id}")
+                msg = f"Checksum mismatch for artifact {artifact.id}"
+                raise ModelStorageError(msg)
 
         try:
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 model_data = pickle.load(f)
 
             return self.deserialize_model(model_data)
 
         except Exception as e:
             logger.error(f"Failed to load artifact {artifact.id}: {e}")
-            raise ModelStorageError(f"Failed to load model artifact: {e}")
+            msg = f"Failed to load model artifact: {e}"
+            raise ModelStorageError(msg)
 
     def _calculate_checksum(self, file_path: Path) -> str:
         """Calculate checksum for file integrity verification"""
         hash_algo = hashlib.sha256()
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_algo.update(chunk)
         return hash_algo.hexdigest()
@@ -260,7 +272,9 @@ class ModelArtifactManager:
 class ModelVersionManager:
     """Main interface for model versioning operations"""
 
-    def __init__(self, config: ModelVersioningConfig | None = None, dbsession: Session = session):
+    def __init__(
+        self, config: ModelVersioningConfig | None = None, dbsession: Session = session
+    ):
         self.config = config or ModelVersioningConfig()
         self.artifact_manager = ModelArtifactManager(self.config)
         self.dbsession = dbsession
@@ -275,9 +289,11 @@ class ModelVersionManager:
         """Register a new model type in the registry"""
 
         # Check if already exists
-        existing = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, model_type=model_type
-        ).first()
+        existing = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, model_type=model_type)
+            .first()
+        )
 
         if existing:
             logger.info(f"Model type {model_name}:{model_type} already registered")
@@ -365,7 +381,8 @@ class ModelVersionManager:
             # Clean up the model version record if artifact saving fails
             self.dbsession.delete(model_version)
             self.dbsession.commit()
-            raise ModelStorageError(f"Failed to register model version: {e}")
+            msg = f"Failed to register model version: {e}"
+            raise ModelStorageError(msg)
 
     def load_model_version(
         self,
@@ -375,36 +392,48 @@ class ModelVersionManager:
         """Load a specific model version or the latest if version not specified"""
 
         try:
-            registry = self.dbsession.query(ModelRegistry).filter_by(
-                model_name=model_name, is_active=True
-            ).one()
+            registry = (
+                self.dbsession.query(ModelRegistry)
+                .filter_by(model_name=model_name, is_active=True)
+                .one()
+            )
         except NoResultFound:
-            raise ModelNotFoundError(f"Model '{model_name}' not found in registry")
+            msg = f"Model '{model_name}' not found in registry"
+            raise ModelNotFoundError(msg)
 
         # Get model version
-        version_query = self.dbsession.query(ModelVersion).filter_by(registry_id=registry.id)
+        version_query = self.dbsession.query(ModelVersion).filter_by(
+            registry_id=registry.id
+        )
 
         if version:
             try:
                 model_version = version_query.filter_by(version=version).one()
             except NoResultFound:
-                raise ModelNotFoundError(f"Version '{version}' not found for model '{model_name}'")
+                msg = f"Version '{version}' not found for model '{model_name}'"
+                raise ModelNotFoundError(msg)
         else:
             # Get latest version
-            model_version = version_query.filter_by(status="ready").order_by(
-                ModelVersion.training_date.desc()
-            ).first()
+            model_version = (
+                version_query.filter_by(status="ready")
+                .order_by(ModelVersion.training_date.desc())
+                .first()
+            )
 
             if not model_version:
-                raise ModelNotFoundError(f"No ready versions found for model '{model_name}'")
+                msg = f"No ready versions found for model '{model_name}'"
+                raise ModelNotFoundError(msg)
 
         # Load artifact
-        artifact = self.dbsession.query(ModelArtifact).filter_by(
-            version_id=model_version.id, artifact_type="full_model"
-        ).first()
+        artifact = (
+            self.dbsession.query(ModelArtifact)
+            .filter_by(version_id=model_version.id, artifact_type="full_model")
+            .first()
+        )
 
         if not artifact:
-            raise ModelStorageError(f"No artifacts found for model version {model_version.id}")
+            msg = f"No artifacts found for model version {model_version.id}"
+            raise ModelStorageError(msg)
 
         model = self.artifact_manager.load_artifact(artifact)
         logger.info(f"Loaded model {model_name} v{model_version.version}")
@@ -437,8 +466,7 @@ class ModelVersionManager:
 
         query = query.order_by(ModelVersion.training_date.desc())
 
-        df = pd.read_sql(query.statement, self.dbsession.bind)
-        return df
+        return pd.read_sql(query.statement, self.dbsession.bind)
 
     def compare_models(
         self,
@@ -451,19 +479,24 @@ class ModelVersionManager:
         if metrics is None:
             metrics = ["validation_mae", "validation_rmse", "validation_accuracy"]
 
-        registry = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, is_active=True
-        ).first()
+        registry = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, is_active=True)
+            .first()
+        )
 
         if not registry:
-            raise ModelNotFoundError(f"Model '{model_name}' not found")
+            msg = f"Model '{model_name}' not found"
+            raise ModelNotFoundError(msg)
 
         # Build comparison data
         comparison_data = []
         for version in versions:
-            model_version = self.dbsession.query(ModelVersion).filter_by(
-                registry_id=registry.id, version=version
-            ).first()
+            model_version = (
+                self.dbsession.query(ModelVersion)
+                .filter_by(registry_id=registry.id, version=version)
+                .first()
+            )
 
             if model_version:
                 row = {"version": version}
@@ -480,28 +513,36 @@ class ModelVersionManager:
     ) -> ModelVersion:
         """Set a specific model version as the production model"""
 
-        registry = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, is_active=True
-        ).first()
+        registry = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, is_active=True)
+            .first()
+        )
 
         if not registry:
-            raise ModelNotFoundError(f"Model '{model_name}' not found")
+            msg = f"Model '{model_name}' not found"
+            raise ModelNotFoundError(msg)
 
         # Unset current production model
-        current_prod = self.dbsession.query(ModelVersion).filter_by(
-            registry_id=registry.id, is_production=True
-        ).first()
+        current_prod = (
+            self.dbsession.query(ModelVersion)
+            .filter_by(registry_id=registry.id, is_production=True)
+            .first()
+        )
 
         if current_prod:
             current_prod.is_production = False
 
         # Set new production model
-        new_prod = self.dbsession.query(ModelVersion).filter_by(
-            registry_id=registry.id, version=version
-        ).first()
+        new_prod = (
+            self.dbsession.query(ModelVersion)
+            .filter_by(registry_id=registry.id, version=version)
+            .first()
+        )
 
         if not new_prod:
-            raise ModelNotFoundError(f"Version '{version}' not found for model '{model_name}'")
+            msg = f"Version '{version}' not found for model '{model_name}'"
+            raise ModelNotFoundError(msg)
 
         new_prod.is_production = True
         new_prod.deployment_date = datetime.now().isoformat()
@@ -514,33 +555,45 @@ class ModelVersionManager:
     def get_production_model(self, model_name: str) -> Any:
         """Get the current production model"""
 
-        registry = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, is_active=True
-        ).first()
+        registry = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, is_active=True)
+            .first()
+        )
 
         if not registry:
-            raise ModelNotFoundError(f"Model '{model_name}' not found")
+            msg = f"Model '{model_name}' not found"
+            raise ModelNotFoundError(msg)
 
-        prod_version = self.dbsession.query(ModelVersion).filter_by(
-            registry_id=registry.id, is_production=True
-        ).first()
+        prod_version = (
+            self.dbsession.query(ModelVersion)
+            .filter_by(registry_id=registry.id, is_production=True)
+            .first()
+        )
 
         if not prod_version:
             # Fall back to latest ready version
-            prod_version = self.dbsession.query(ModelVersion).filter_by(
-                registry_id=registry.id, status="ready"
-            ).order_by(ModelVersion.training_date.desc()).first()
+            prod_version = (
+                self.dbsession.query(ModelVersion)
+                .filter_by(registry_id=registry.id, status="ready")
+                .order_by(ModelVersion.training_date.desc())
+                .first()
+            )
 
             if not prod_version:
-                raise ModelNotFoundError(f"No production or ready model found for '{model_name}'")
+                msg = f"No production or ready model found for '{model_name}'"
+                raise ModelNotFoundError(msg)
 
         # Load the model
-        artifact = self.dbsession.query(ModelArtifact).filter_by(
-            version_id=prod_version.id, artifact_type="full_model"
-        ).first()
+        artifact = (
+            self.dbsession.query(ModelArtifact)
+            .filter_by(version_id=prod_version.id, artifact_type="full_model")
+            .first()
+        )
 
         if not artifact:
-            raise ModelStorageError(f"No artifacts found for production model {prod_version.id}")
+            msg = f"No artifacts found for production model {prod_version.id}"
+            raise ModelStorageError(msg)
 
         return self.artifact_manager.load_artifact(artifact)
 
@@ -555,19 +608,25 @@ class ModelVersionManager:
     ) -> ModelPerformance:
         """Record performance metrics for a model version"""
 
-        registry = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, is_active=True
-        ).first()
+        registry = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, is_active=True)
+            .first()
+        )
 
         if not registry:
-            raise ModelNotFoundError(f"Model '{model_name}' not found")
+            msg = f"Model '{model_name}' not found"
+            raise ModelNotFoundError(msg)
 
-        model_version = self.dbsession.query(ModelVersion).filter_by(
-            registry_id=registry.id, version=version
-        ).first()
+        model_version = (
+            self.dbsession.query(ModelVersion)
+            .filter_by(registry_id=registry.id, version=version)
+            .first()
+        )
 
         if not model_version:
-            raise ModelNotFoundError(f"Version '{version}' not found for model '{model_name}'")
+            msg = f"Version '{version}' not found for model '{model_name}'"
+            raise ModelNotFoundError(msg)
 
         performance = ModelPerformance(
             version_id=model_version.id,
@@ -584,10 +643,24 @@ class ModelVersionManager:
             prediction_correlation=metrics.get("prediction_correlation"),
             top_transfer_accuracy=metrics.get("top_transfer_accuracy"),
             points_captured=metrics.get("points_captured"),
-            additional_metrics=json.dumps({k: v for k, v in metrics.items()
-                                         if k not in ["mae", "rmse", "accuracy", "precision",
-                                                     "recall", "f1_score", "prediction_correlation",
-                                                     "top_transfer_accuracy", "points_captured"]})
+            additional_metrics=json.dumps(
+                {
+                    k: v
+                    for k, v in metrics.items()
+                    if k
+                    not in [
+                        "mae",
+                        "rmse",
+                        "accuracy",
+                        "precision",
+                        "recall",
+                        "f1_score",
+                        "prediction_correlation",
+                        "top_transfer_accuracy",
+                        "points_captured",
+                    ]
+                }
+            ),
         )
 
         self.dbsession.add(performance)
@@ -604,22 +677,29 @@ class ModelVersionManager:
     ) -> int:
         """Clean up old model versions and artifacts"""
 
-        registry = self.dbsession.query(ModelRegistry).filter_by(
-            model_name=model_name, is_active=True
-        ).first()
+        registry = (
+            self.dbsession.query(ModelRegistry)
+            .filter_by(model_name=model_name, is_active=True)
+            .first()
+        )
 
         if not registry:
-            raise ModelNotFoundError(f"Model '{model_name}' not found")
+            msg = f"Model '{model_name}' not found"
+            raise ModelNotFoundError(msg)
 
         # Get versions to keep
-        versions_query = self.dbsession.query(ModelVersion).filter_by(registry_id=registry.id)
+        versions_query = self.dbsession.query(ModelVersion).filter_by(
+            registry_id=registry.id
+        )
 
         keep_versions = set()
 
         # Keep latest versions
-        latest_versions = versions_query.order_by(
-            ModelVersion.training_date.desc()
-        ).limit(keep_latest).all()
+        latest_versions = (
+            versions_query.order_by(ModelVersion.training_date.desc())
+            .limit(keep_latest)
+            .all()
+        )
         keep_versions.update(v.id for v in latest_versions)
 
         # Keep production version
@@ -635,9 +715,11 @@ class ModelVersionManager:
         deleted_count = 0
         for version in delete_versions:
             # Delete artifacts
-            artifacts = self.dbsession.query(ModelArtifact).filter_by(
-                version_id=version.id
-            ).all()
+            artifacts = (
+                self.dbsession.query(ModelArtifact)
+                .filter_by(version_id=version.id)
+                .all()
+            )
 
             for artifact in artifacts:
                 if artifact.file_path and Path(artifact.file_path).exists():
@@ -645,9 +727,11 @@ class ModelVersionManager:
                 self.dbsession.delete(artifact)
 
             # Delete performance records
-            performances = self.dbsession.query(ModelPerformance).filter_by(
-                version_id=version.id
-            ).all()
+            performances = (
+                self.dbsession.query(ModelPerformance)
+                .filter_by(version_id=version.id)
+                .all()
+            )
             for perf in performances:
                 self.dbsession.delete(perf)
 
@@ -662,12 +746,7 @@ class ModelVersionManager:
 
 
 # Convenience functions for easy access
-def register_model(
-    model: Any,
-    model_name: str,
-    version: str,
-    **kwargs
-) -> ModelVersion:
+def register_model(model: Any, model_name: str, version: str, **kwargs) -> ModelVersion:
     """Convenience function to register a model version"""
     manager = ModelVersionManager()
     return manager.register_model_version(model, model_name, version, **kwargs)

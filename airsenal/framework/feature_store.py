@@ -15,14 +15,14 @@ Key Features:
 
 Usage:
     store = FeatureStore()
-    
+
     # Register a new feature
     store.register_feature(
         name="rolling_goals_5",
         feature_type="player",
         computation_logic={"window": 5, "metric": "goals", "agg": "mean"}
     )
-    
+
     # Get features for players
     features = store.get_features(
         entity_type="player",
@@ -31,7 +31,7 @@ Usage:
         season="2425",
         gameweek=10
     )
-    
+
     # Batch compute features
     store.compute_features_batch(
         feature_names=["rolling_goals_5"],
@@ -93,24 +93,29 @@ class FeatureRegistry:
         description: str | None = None,
         computation_logic: dict[str, Any] | None = None,
         dependencies: list[str] | None = None,
-        replace_existing: bool = False
+        replace_existing: bool = False,
     ) -> FeatureDefinition:
         """Register a new feature or update existing one."""
 
         # Check if feature already exists
-        existing = self.dbsession.query(FeatureDefinition).filter_by(
-            name=name, version=version
-        ).first()
+        existing = (
+            self.dbsession.query(FeatureDefinition)
+            .filter_by(name=name, version=version)
+            .first()
+        )
 
         if existing and not replace_existing:
-            raise ValueError(f"Feature {name}:{version} already exists. Use replace_existing=True to update.")
+            msg = f"Feature {name}:{version} already exists. Use replace_existing=True to update."
+            raise ValueError(msg)
 
         if existing and replace_existing:
             # Update existing feature
             existing.feature_type = feature_type
             existing.data_type = data_type
             existing.description = description
-            existing.computation_logic = json.dumps(computation_logic) if computation_logic else None
+            existing.computation_logic = (
+                json.dumps(computation_logic) if computation_logic else None
+            )
             existing.dependencies = ",".join(dependencies) if dependencies else None
             existing.updated_at = datetime.now().isoformat()
             feature_def = existing
@@ -122,19 +127,23 @@ class FeatureRegistry:
                 feature_type=feature_type,
                 data_type=data_type,
                 description=description,
-                computation_logic=json.dumps(computation_logic) if computation_logic else None,
+                computation_logic=json.dumps(computation_logic)
+                if computation_logic
+                else None,
                 dependencies=",".join(dependencies) if dependencies else None,
                 is_active=True,
                 created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat()
+                updated_at=datetime.now().isoformat(),
             )
             self.dbsession.add(feature_def)
 
         self.dbsession.commit()
-        logger.info(f"Registered feature: {name}:{version}")
+        logger.info("Registered feature: %s:%s", name, version)
         return feature_def
 
-    def get_feature_definition(self, name: str, version: str | None = None) -> FeatureDefinition:
+    def get_feature_definition(
+        self, name: str, version: str | None = None
+    ) -> FeatureDefinition:
         """Get feature definition by name and optional version."""
         query = self.dbsession.query(FeatureDefinition).filter_by(
             name=name, is_active=True
@@ -148,7 +157,8 @@ class FeatureRegistry:
 
         feature_def = query.first()
         if not feature_def:
-            raise FeatureNotFoundError(f"Feature {name}:{version or 'latest'} not found")
+            msg = f"Feature {name}:{version or 'latest'} not found"
+            raise FeatureNotFoundError(msg)
 
         return feature_def
 
@@ -174,12 +184,13 @@ class FeatureCacheManager:
             "misses": 0,
             "memory_hits": 0,
             "redis_hits": 0,
-            "db_hits": 0
+            "db_hits": 0,
         }
 
         # Initialize Redis cache integration
         try:
             from airsenal.framework.redis_cache import redis_cache
+
             self.redis_cache = redis_cache
             self.redis_enabled = redis_cache.is_available()
         except ImportError:
@@ -187,11 +198,15 @@ class FeatureCacheManager:
             self.redis_enabled = False
             logger.warning("Redis cache not available - using memory + database only")
 
-    def _make_cache_key(self, feature_name: str, entity_type: str, entity_id: int, context: str = "") -> str:
+    def _make_cache_key(
+        self, feature_name: str, entity_type: str, entity_id: int, context: str = ""
+    ) -> str:
         """Create a cache key from components."""
         return f"{feature_name}:{entity_type}:{entity_id}:{context}"
 
-    def get(self, feature_name: str, entity_type: str, entity_id: int, context: str = "") -> float | str | None:
+    def get(
+        self, feature_name: str, entity_type: str, entity_id: int, context: str = ""
+    ) -> float | str | None:
         """Get cached feature value with memory -> Redis -> database cache hierarchy."""
         cache_key = self._make_cache_key(feature_name, entity_type, entity_id, context)
 
@@ -212,7 +227,7 @@ class FeatureCacheManager:
                     feature_name=feature_name,
                     entity_type=entity_type,
                     entity_id=entity_id,
-                    context={"context": context} if context else None
+                    context={"context": context} if context else None,
                 )
 
                 if redis_value is not None:
@@ -224,12 +239,12 @@ class FeatureCacheManager:
                     return redis_value
 
             except Exception as e:
-                logger.warning(f"Redis cache error: {e}")
+                logger.warning("Redis cache error: %s", e)
 
         # 3. Check database cache (slowest)
-        cache_entry = self.dbsession.query(FeatureCache).filter_by(
-            cache_key=cache_key
-        ).first()
+        cache_entry = (
+            self.dbsession.query(FeatureCache).filter_by(cache_key=cache_key).first()
+        )
 
         if cache_entry:
             expires_at = datetime.fromisoformat(cache_entry.expires_at)
@@ -238,7 +253,11 @@ class FeatureCacheManager:
                 cache_entry.hit_count += 1
                 self.dbsession.commit()
 
-                value = cache_entry.value if cache_entry.value is not None else cache_entry.string_value
+                value = (
+                    cache_entry.value
+                    if cache_entry.value is not None
+                    else cache_entry.string_value
+                )
 
                 # Refresh memory cache
                 self._memory_cache[cache_key] = (value, expires_at)
@@ -246,7 +265,9 @@ class FeatureCacheManager:
                 # Refresh Redis cache
                 if self.redis_enabled:
                     try:
-                        remaining_ttl = int((expires_at - datetime.now()).total_seconds())
+                        remaining_ttl = int(
+                            (expires_at - datetime.now()).total_seconds()
+                        )
                         if remaining_ttl > 0:
                             self.redis_cache.set_feature_cache(
                                 feature_name=feature_name,
@@ -254,10 +275,10 @@ class FeatureCacheManager:
                                 entity_id=entity_id,
                                 value=value,
                                 context={"context": context} if context else None,
-                                ttl=remaining_ttl
+                                ttl=remaining_ttl,
                             )
                     except Exception as e:
-                        logger.warning(f"Redis cache set error: {e}")
+                        logger.warning("Redis cache set error: %s", e)
 
                 self._cache_stats["hits"] += 1
                 self._cache_stats["db_hits"] += 1
@@ -276,7 +297,7 @@ class FeatureCacheManager:
         entity_id: int,
         value: float | str,
         ttl: int | None = None,
-        context: str = ""
+        context: str = "",
     ) -> None:
         """Cache feature value in memory, Redis, and database."""
         cache_key = self._make_cache_key(feature_name, entity_type, entity_id, context)
@@ -295,19 +316,21 @@ class FeatureCacheManager:
                     entity_id=entity_id,
                     value=value,
                     context={"context": context} if context else None,
-                    ttl=ttl
+                    ttl=ttl,
                 )
             except Exception as e:
-                logger.warning(f"Redis cache set error: {e}")
+                logger.warning("Redis cache set error: %s", e)
 
         # 3. Update database cache (persistent)
-        cache_entry = self.dbsession.query(FeatureCache).filter_by(
-            cache_key=cache_key
-        ).first()
+        cache_entry = (
+            self.dbsession.query(FeatureCache).filter_by(cache_key=cache_key).first()
+        )
 
         if cache_entry:
-            cache_entry.value = value if isinstance(value, (int, float)) else None
-            cache_entry.string_value = str(value) if not isinstance(value, (int, float)) else None
+            cache_entry.value = value if isinstance(value, int | float) else None
+            cache_entry.string_value = (
+                str(value) if not isinstance(value, int | float) else None
+            )
             cache_entry.cached_at = datetime.now().isoformat()
             cache_entry.expires_at = expires_at.isoformat()
         else:
@@ -316,17 +339,22 @@ class FeatureCacheManager:
                 feature_name=feature_name,
                 entity_type=entity_type,
                 entity_id=entity_id,
-                value=value if isinstance(value, (int, float)) else None,
-                string_value=str(value) if not isinstance(value, (int, float)) else None,
+                value=value if isinstance(value, int | float) else None,
+                string_value=str(value) if not isinstance(value, int | float) else None,
                 cached_at=datetime.now().isoformat(),
                 expires_at=expires_at.isoformat(),
-                hit_count=0
+                hit_count=0,
             )
             self.dbsession.add(cache_entry)
 
         self.dbsession.commit()
 
-    def invalidate(self, feature_name: str, entity_type: str | None = None, entity_id: int | None = None) -> int:
+    def invalidate(
+        self,
+        feature_name: str,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
+    ) -> int:
         """Invalidate cached values matching the criteria from all cache levels."""
         total_invalidated = 0
 
@@ -347,14 +375,18 @@ class FeatureCacheManager:
             try:
                 if entity_type and entity_id:
                     # Specific entity invalidation
-                    redis_count = self.redis_cache.invalidate_player_cache(entity_id) if entity_type == "player" else 0
+                    redis_count = (
+                        self.redis_cache.invalidate_player_cache(entity_id)
+                        if entity_type == "player"
+                        else 0
+                    )
                 else:
                     # Pattern-based invalidation for feature name
                     pattern = f"{self.redis_cache.namespace}:{self.redis_cache.version}:feat:*:{feature_name}*"
                     redis_count = self.redis_cache.delete_pattern(pattern)
                 total_invalidated += redis_count
             except Exception as e:
-                logger.warning(f"Redis cache invalidation error: {e}")
+                logger.warning("Redis cache invalidation error: %s", e)
 
         # 3. Clear from database cache
         query = self.dbsession.query(FeatureCache).filter_by(feature_name=feature_name)
@@ -368,23 +400,37 @@ class FeatureCacheManager:
         self.dbsession.commit()
         total_invalidated += db_count
 
-        logger.info(f"Invalidated {total_invalidated} cache entries for {feature_name}")
+        logger.info(
+            "Invalidated %s cache entries for %s", total_invalidated, feature_name
+        )
         return total_invalidated
 
     def get_stats(self) -> dict[str, Any]:
         """Get comprehensive cache performance statistics across all levels."""
         total_requests = self._cache_stats["hits"] + self._cache_stats["misses"]
-        hit_rate = self._cache_stats["hits"] / total_requests if total_requests > 0 else 0
+        hit_rate = (
+            self._cache_stats["hits"] / total_requests if total_requests > 0 else 0
+        )
 
         # Calculate hit rates by cache level
-        memory_hit_rate = self._cache_stats["memory_hits"] / total_requests if total_requests > 0 else 0
-        redis_hit_rate = self._cache_stats["redis_hits"] / total_requests if total_requests > 0 else 0
-        db_hit_rate = self._cache_stats["db_hits"] / total_requests if total_requests > 0 else 0
+        memory_hit_rate = (
+            self._cache_stats["memory_hits"] / total_requests
+            if total_requests > 0
+            else 0
+        )
+        redis_hit_rate = (
+            self._cache_stats["redis_hits"] / total_requests
+            if total_requests > 0
+            else 0
+        )
+        db_hit_rate = (
+            self._cache_stats["db_hits"] / total_requests if total_requests > 0 else 0
+        )
 
         # Get database cache stats
         db_stats = self.dbsession.query(
             func.count(FeatureCache.id).label("total_entries"),
-            func.avg(FeatureCache.hit_count).label("avg_hits")
+            func.avg(FeatureCache.hit_count).label("avg_hits"),
         ).first()
 
         stats = {
@@ -392,19 +438,19 @@ class FeatureCacheManager:
                 "hit_rate": hit_rate,
                 "total_requests": total_requests,
                 "total_hits": self._cache_stats["hits"],
-                "total_misses": self._cache_stats["misses"]
+                "total_misses": self._cache_stats["misses"],
             },
             "memory_cache": {
                 "entries": len(self._memory_cache),
                 "hit_rate": memory_hit_rate,
-                "hits": self._cache_stats["memory_hits"]
+                "hits": self._cache_stats["memory_hits"],
             },
             "database_cache": {
                 "total_entries": db_stats.total_entries or 0,
                 "average_hits": float(db_stats.avg_hits or 0),
                 "hit_rate": db_hit_rate,
-                "hits": self._cache_stats["db_hits"]
-            }
+                "hits": self._cache_stats["db_hits"],
+            },
         }
 
         # Add Redis stats if available
@@ -416,9 +462,13 @@ class FeatureCacheManager:
                     "hit_rate": redis_hit_rate,
                     "hits": self._cache_stats["redis_hits"],
                     "total_size_mb": redis_metrics.get("total_size_mb", 0),
-                    "avg_retrieval_time_ms": redis_metrics.get("avg_retrieval_time_ms", 0),
-                    "connection_status": redis_metrics.get("connection_status", "unknown"),
-                    "compression": redis_metrics.get("compression", "none")
+                    "avg_retrieval_time_ms": redis_metrics.get(
+                        "avg_retrieval_time_ms", 0
+                    ),
+                    "connection_status": redis_metrics.get(
+                        "connection_status", "unknown"
+                    ),
+                    "compression": redis_metrics.get("compression", "none"),
                 }
 
                 # Add Redis server info if available
@@ -427,14 +477,11 @@ class FeatureCacheManager:
                     stats["redis_cache"]["server_info"] = redis_info
 
             except Exception as e:
-                stats["redis_cache"] = {
-                    "available": False,
-                    "error": str(e)
-                }
+                stats["redis_cache"] = {"available": False, "error": str(e)}
         else:
             stats["redis_cache"] = {
                 "available": False,
-                "reason": "Redis not enabled or not available"
+                "reason": "Redis not enabled or not available",
             }
 
         return stats
@@ -455,24 +502,39 @@ class FeatureComputer:
         aggregation: str = "mean",
         season: str = CURRENT_SEASON,
         gameweek: int = NEXT_GAMEWEEK,
-        min_periods: int = 1
+        min_periods: int = 1,
     ) -> float | None:
         """Compute rolling statistics over a sliding window."""
 
-        if entity_type == "player" and metric_name in ["goals", "assists", "minutes", "points"]:
+        if entity_type == "player" and metric_name in [
+            "goals",
+            "assists",
+            "minutes",
+            "points",
+        ]:
             # Query PlayerScore for historical data
-            query = self.dbsession.query(PlayerScore).join(Fixture).filter(
-                PlayerScore.player_id == entity_id,
-                Fixture.season == season,
-                Fixture.gameweek < gameweek
-            ).order_by(desc(Fixture.gameweek)).limit(window_size)
+            query = (
+                self.dbsession.query(PlayerScore)
+                .join(Fixture)
+                .filter(
+                    PlayerScore.player_id == entity_id,
+                    Fixture.season == season,
+                    Fixture.gameweek < gameweek,
+                )
+                .order_by(desc(Fixture.gameweek))
+                .limit(window_size)
+            )
 
             scores = query.all()
 
             if len(scores) < min_periods:
                 return None
 
-            values = [getattr(score, metric_name) for score in scores if getattr(score, metric_name) is not None]
+            values = [
+                getattr(score, metric_name)
+                for score in scores
+                if getattr(score, metric_name) is not None
+            ]
 
             if len(values) < min_periods:
                 return None
@@ -494,16 +556,22 @@ class FeatureComputer:
                 return float(np.percentile(values, 25))
             if aggregation == "q75":
                 return float(np.percentile(values, 75))
-            raise ValueError(f"Unsupported aggregation: {aggregation}")
+            msg = f"Unsupported aggregation: {aggregation}"
+            raise ValueError(msg)
 
         # Use FeatureTimeSeries for other metrics
-        query = self.dbsession.query(FeatureTimeSeries).filter(
-            FeatureTimeSeries.entity_type == entity_type,
-            FeatureTimeSeries.entity_id == entity_id,
-            FeatureTimeSeries.metric_name == metric_name,
-            FeatureTimeSeries.season == season,
-            FeatureTimeSeries.gameweek < gameweek
-        ).order_by(desc(FeatureTimeSeries.gameweek)).limit(window_size)
+        query = (
+            self.dbsession.query(FeatureTimeSeries)
+            .filter(
+                FeatureTimeSeries.entity_type == entity_type,
+                FeatureTimeSeries.entity_id == entity_id,
+                FeatureTimeSeries.metric_name == metric_name,
+                FeatureTimeSeries.season == season,
+                FeatureTimeSeries.gameweek < gameweek,
+            )
+            .order_by(desc(FeatureTimeSeries.gameweek))
+            .limit(window_size)
+        )
 
         series_data = query.all()
 
@@ -529,7 +597,8 @@ class FeatureComputer:
             return float(np.percentile(values, 25))
         if aggregation == "q75":
             return float(np.percentile(values, 75))
-        raise ValueError(f"Unsupported aggregation: {aggregation}")
+        msg = f"Unsupported aggregation: {aggregation}"
+        raise ValueError(msg)
 
     def compute_form_metric(
         self,
@@ -538,28 +607,48 @@ class FeatureComputer:
         metric_name: str,
         season: str = CURRENT_SEASON,
         gameweek: int = NEXT_GAMEWEEK,
-        decay_factor: float = 0.9
+        decay_factor: float = 0.9,
     ) -> float | None:
         """Compute exponentially weighted form metric."""
 
         # Get historical data points
-        if entity_type == "player" and metric_name in ["goals", "assists", "minutes", "points"]:
-            query = self.dbsession.query(PlayerScore).join(Fixture).filter(
-                PlayerScore.player_id == entity_id,
-                Fixture.season == season,
-                Fixture.gameweek < gameweek
-            ).order_by(desc(Fixture.gameweek)).limit(10)  # Last 10 games for form
+        if entity_type == "player" and metric_name in [
+            "goals",
+            "assists",
+            "minutes",
+            "points",
+        ]:
+            query = (
+                self.dbsession.query(PlayerScore)
+                .join(Fixture)
+                .filter(
+                    PlayerScore.player_id == entity_id,
+                    Fixture.season == season,
+                    Fixture.gameweek < gameweek,
+                )
+                .order_by(desc(Fixture.gameweek))
+                .limit(10)
+            )  # Last 10 games for form
 
             scores = query.all()
-            values = [getattr(score, metric_name) for score in scores if getattr(score, metric_name) is not None]
+            values = [
+                getattr(score, metric_name)
+                for score in scores
+                if getattr(score, metric_name) is not None
+            ]
         else:
-            query = self.dbsession.query(FeatureTimeSeries).filter(
-                FeatureTimeSeries.entity_type == entity_type,
-                FeatureTimeSeries.entity_id == entity_id,
-                FeatureTimeSeries.metric_name == metric_name,
-                FeatureTimeSeries.season == season,
-                FeatureTimeSeries.gameweek < gameweek
-            ).order_by(desc(FeatureTimeSeries.gameweek)).limit(10)
+            query = (
+                self.dbsession.query(FeatureTimeSeries)
+                .filter(
+                    FeatureTimeSeries.entity_type == entity_type,
+                    FeatureTimeSeries.entity_id == entity_id,
+                    FeatureTimeSeries.metric_name == metric_name,
+                    FeatureTimeSeries.season == season,
+                    FeatureTimeSeries.gameweek < gameweek,
+                )
+                .order_by(desc(FeatureTimeSeries.gameweek))
+                .limit(10)
+            )
 
             series_data = query.all()
             values = [data.value for data in series_data]
@@ -568,7 +657,7 @@ class FeatureComputer:
             return None
 
         # Compute exponentially weighted average
-        weights = np.array([decay_factor ** i for i in range(len(values))])
+        weights = np.array([decay_factor**i for i in range(len(values))])
         weighted_values = np.array(values) * weights
 
         return float(weighted_values.sum() / weights.sum())
@@ -579,17 +668,19 @@ class FeatureComputer:
         entity_type: str,
         entity_id: int,
         season: str = CURRENT_SEASON,
-        gameweek: int = NEXT_GAMEWEEK
+        gameweek: int = NEXT_GAMEWEEK,
     ) -> float | str | None:
         """Compute feature value based on its computation logic."""
 
         if not feature_def.computation_logic:
-            raise FeatureComputationError(f"No computation logic defined for feature {feature_def.name}")
+            msg = f"No computation logic defined for feature {feature_def.name}"
+            raise FeatureComputationError(msg)
 
         try:
             logic = json.loads(feature_def.computation_logic)
         except json.JSONDecodeError as e:
-            raise FeatureComputationError(f"Invalid computation logic JSON for {feature_def.name}: {e}")
+            msg = f"Invalid computation logic JSON for {feature_def.name}: {e}"
+            raise FeatureComputationError(msg)
 
         computation_type = logic.get("type", "rolling")
 
@@ -602,7 +693,7 @@ class FeatureComputer:
                 aggregation=logic.get("agg", "mean"),
                 season=season,
                 gameweek=gameweek,
-                min_periods=logic.get("min_periods", 1)
+                min_periods=logic.get("min_periods", 1),
             )
 
         if computation_type == "form":
@@ -612,14 +703,16 @@ class FeatureComputer:
                 metric_name=logic["metric"],
                 season=season,
                 gameweek=gameweek,
-                decay_factor=logic.get("decay_factor", 0.9)
+                decay_factor=logic.get("decay_factor", 0.9),
             )
 
         if computation_type == "static":
             # For static features that don't change over time
             metric = logic["metric"]
             if entity_type == "player" and metric in ["position", "team"]:
-                player = self.dbsession.query(Player).filter_by(player_id=entity_id).first()
+                player = (
+                    self.dbsession.query(Player).filter_by(player_id=entity_id).first()
+                )
                 if player:
                     if metric == "position":
                         return player.position(season)
@@ -628,7 +721,8 @@ class FeatureComputer:
 
             return None
 
-        raise FeatureComputationError(f"Unsupported computation type: {computation_type}")
+        msg = f"Unsupported computation type: {computation_type}"
+        raise FeatureComputationError(msg)
 
 
 class FeatureValidator:
@@ -638,9 +732,7 @@ class FeatureValidator:
         self.dbsession = dbsession
 
     def validate_feature_value(
-        self,
-        feature_def: FeatureDefinition,
-        value: float | str | None
+        self, feature_def: FeatureDefinition, value: float | str | None
     ) -> bool:
         """Validate that a feature value conforms to its definition."""
 
@@ -649,26 +741,44 @@ class FeatureValidator:
             return True  # Null values are generally acceptable
 
         # Check data type compliance
-        if feature_def.data_type == "float" and not isinstance(value, (int, float)):
-            logger.warning(f"Type mismatch for {feature_def.name}: expected float, got {type(value)}")
+        if feature_def.data_type == "float" and not isinstance(value, int | float):
+            logger.warning(
+                "Type mismatch for %s: expected float, got %s",
+                feature_def.name,
+                type(value),
+            )
             return False
 
         if feature_def.data_type == "int" and not isinstance(value, int):
-            logger.warning(f"Type mismatch for {feature_def.name}: expected int, got {type(value)}")
+            logger.warning(
+                "Type mismatch for %s: expected int, got %s",
+                feature_def.name,
+                type(value),
+            )
             return False
 
         if feature_def.data_type == "string" and not isinstance(value, str):
-            logger.warning(f"Type mismatch for {feature_def.name}: expected string, got {type(value)}")
+            logger.warning(
+                "Type mismatch for %s: expected string, got %s",
+                feature_def.name,
+                type(value),
+            )
             return False
 
         if feature_def.data_type == "boolean" and not isinstance(value, bool):
-            logger.warning(f"Type mismatch for {feature_def.name}: expected boolean, got {type(value)}")
+            logger.warning(
+                "Type mismatch for %s: expected boolean, got %s",
+                feature_def.name,
+                type(value),
+            )
             return False
 
         # Range validation for numeric features
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             if np.isnan(value) or np.isinf(value):
-                logger.warning(f"Invalid numeric value for {feature_def.name}: {value}")
+                logger.warning(
+                    "Invalid numeric value for %s: %s", feature_def.name, value
+                )
                 return False
 
         return True
@@ -679,25 +789,33 @@ class FeatureValidator:
         entity_type: str,
         current_season: str,
         reference_season: str,
-        drift_threshold: float = 0.1
+        drift_threshold: float = 0.1,
     ) -> dict[str, Any]:
         """Check for statistical drift in feature values between seasons."""
 
         # Get current season values
-        current_query = self.dbsession.query(ComputedFeature).join(FeatureDefinition).filter(
-            FeatureDefinition.name == feature_name,
-            ComputedFeature.entity_type == entity_type,
-            ComputedFeature.season == current_season,
-            ComputedFeature.value.isnot(None)
+        current_query = (
+            self.dbsession.query(ComputedFeature)
+            .join(FeatureDefinition)
+            .filter(
+                FeatureDefinition.name == feature_name,
+                ComputedFeature.entity_type == entity_type,
+                ComputedFeature.season == current_season,
+                ComputedFeature.value.isnot(None),
+            )
         )
         current_values = [cf.value for cf in current_query.all()]
 
         # Get reference season values
-        reference_query = self.dbsession.query(ComputedFeature).join(FeatureDefinition).filter(
-            FeatureDefinition.name == feature_name,
-            ComputedFeature.entity_type == entity_type,
-            ComputedFeature.season == reference_season,
-            ComputedFeature.value.isnot(None)
+        reference_query = (
+            self.dbsession.query(ComputedFeature)
+            .join(FeatureDefinition)
+            .filter(
+                FeatureDefinition.name == feature_name,
+                ComputedFeature.entity_type == entity_type,
+                ComputedFeature.season == reference_season,
+                ComputedFeature.value.isnot(None),
+            )
         )
         reference_values = [cf.value for cf in reference_query.all()]
 
@@ -711,8 +829,16 @@ class FeatureValidator:
         reference_std = np.std(reference_values)
 
         # Check for significant changes in mean and standard deviation
-        mean_change = abs(current_mean - reference_mean) / abs(reference_mean) if reference_mean != 0 else 0
-        std_change = abs(current_std - reference_std) / abs(reference_std) if reference_std != 0 else 0
+        mean_change = (
+            abs(current_mean - reference_mean) / abs(reference_mean)
+            if reference_mean != 0
+            else 0
+        )
+        std_change = (
+            abs(current_std - reference_std) / abs(reference_std)
+            if reference_std != 0
+            else 0
+        )
 
         drift_detected = mean_change > drift_threshold or std_change > drift_threshold
 
@@ -720,8 +846,16 @@ class FeatureValidator:
             "drift_detected": drift_detected,
             "mean_change": mean_change,
             "std_change": std_change,
-            "current_stats": {"mean": current_mean, "std": current_std, "count": len(current_values)},
-            "reference_stats": {"mean": reference_mean, "std": reference_std, "count": len(reference_values)}
+            "current_stats": {
+                "mean": current_mean,
+                "std": current_std,
+                "count": len(current_values),
+            },
+            "reference_stats": {
+                "mean": reference_mean,
+                "std": reference_std,
+                "count": len(reference_values),
+            },
         }
 
 
@@ -745,64 +879,98 @@ class FeatureStore:
                 "name": "rolling_goals_5",
                 "feature_type": "player",
                 "description": "5-game rolling average of goals scored",
-                "computation_logic": {"type": "rolling", "metric": "goals", "window": 5, "agg": "mean"}
+                "computation_logic": {
+                    "type": "rolling",
+                    "metric": "goals",
+                    "window": 5,
+                    "agg": "mean",
+                },
             },
             {
                 "name": "rolling_assists_5",
                 "feature_type": "player",
                 "description": "5-game rolling average of assists",
-                "computation_logic": {"type": "rolling", "metric": "assists", "window": 5, "agg": "mean"}
+                "computation_logic": {
+                    "type": "rolling",
+                    "metric": "assists",
+                    "window": 5,
+                    "agg": "mean",
+                },
             },
             {
                 "name": "rolling_minutes_5",
                 "feature_type": "player",
                 "description": "5-game rolling average of minutes played",
-                "computation_logic": {"type": "rolling", "metric": "minutes", "window": 5, "agg": "mean"}
+                "computation_logic": {
+                    "type": "rolling",
+                    "metric": "minutes",
+                    "window": 5,
+                    "agg": "mean",
+                },
             },
             {
                 "name": "rolling_points_5",
                 "feature_type": "player",
                 "description": "5-game rolling average of FPL points",
-                "computation_logic": {"type": "rolling", "metric": "points", "window": 5, "agg": "mean"}
+                "computation_logic": {
+                    "type": "rolling",
+                    "metric": "points",
+                    "window": 5,
+                    "agg": "mean",
+                },
             },
             {
                 "name": "goals_form",
                 "feature_type": "player",
                 "description": "Exponentially weighted goals form",
-                "computation_logic": {"type": "form", "metric": "goals", "decay_factor": 0.9}
+                "computation_logic": {
+                    "type": "form",
+                    "metric": "goals",
+                    "decay_factor": 0.9,
+                },
             },
             {
                 "name": "assists_form",
                 "feature_type": "player",
                 "description": "Exponentially weighted assists form",
-                "computation_logic": {"type": "form", "metric": "assists", "decay_factor": 0.9}
+                "computation_logic": {
+                    "type": "form",
+                    "metric": "assists",
+                    "decay_factor": 0.9,
+                },
             },
             {
                 "name": "player_position",
                 "feature_type": "player",
                 "data_type": "string",
                 "description": "Player position (GK, DEF, MID, FWD)",
-                "computation_logic": {"type": "static", "metric": "position"}
+                "computation_logic": {"type": "static", "metric": "position"},
             },
             {
                 "name": "player_team",
                 "feature_type": "player",
                 "data_type": "string",
                 "description": "Player's current team",
-                "computation_logic": {"type": "static", "metric": "team"}
-            }
+                "computation_logic": {"type": "static", "metric": "team"},
+            },
         ]
 
         for feature_config in default_features:
             try:
-                existing = self.dbsession.query(FeatureDefinition).filter_by(
-                    name=feature_config["name"]
-                ).first()
+                existing = (
+                    self.dbsession.query(FeatureDefinition)
+                    .filter_by(name=feature_config["name"])
+                    .first()
+                )
 
                 if not existing:
                     self.registry.register_feature(**feature_config)
             except Exception as e:
-                logger.warning(f"Failed to register default feature {feature_config['name']}: {e}")
+                logger.warning(
+                    "Failed to register default feature %s: %s",
+                    feature_config["name"],
+                    e,
+                )
 
     def register_feature(self, **kwargs) -> FeatureDefinition:
         """Register a new feature. Proxy to FeatureRegistry.register_feature."""
@@ -815,11 +983,11 @@ class FeatureStore:
         feature_names: list[str],
         season: str = CURRENT_SEASON,
         gameweek: int = NEXT_GAMEWEEK,
-        use_cache: bool = True
+        use_cache: bool = True,
     ) -> dict[int, dict[str, float | str | None]]:
         """
         Get feature values for multiple entities and features.
-        
+
         Returns:
             Dict mapping entity_id -> {feature_name: value}
         """
@@ -830,14 +998,13 @@ class FeatureStore:
 
         for entity_id in entity_ids:
             for feature_name in feature_names:
-
                 # Try cache first
                 if use_cache:
                     cached_value = self.cache.get(
                         feature_name=feature_name,
                         entity_type=entity_type,
                         entity_id=entity_id,
-                        context=f"{season}:{gameweek}"
+                        context=f"{season}:{gameweek}",
                     )
 
                     if cached_value is not None:
@@ -853,12 +1020,17 @@ class FeatureStore:
                         entity_type=entity_type,
                         entity_id=entity_id,
                         season=season,
-                        gameweek=gameweek
+                        gameweek=gameweek,
                     )
 
                     # Validate value
                     if not self.validator.validate_feature_value(feature_def, value):
-                        logger.warning(f"Validation failed for {feature_name} on {entity_type}:{entity_id}")
+                        logger.warning(
+                            "Validation failed for %s on %s:%s",
+                            feature_name,
+                            entity_type,
+                            entity_id,
+                        )
                         value = None
 
                     results[entity_id][feature_name] = value
@@ -871,16 +1043,28 @@ class FeatureStore:
                             entity_type=entity_type,
                             entity_id=entity_id,
                             value=value,
-                            context=f"{season}:{gameweek}"
+                            context=f"{season}:{gameweek}",
                         )
 
                 except Exception as e:
-                    logger.error(f"Failed to compute {feature_name} for {entity_type}:{entity_id}: {e}")
+                    logger.error(
+                        "Failed to compute %s for %s:%s: %s",
+                        feature_name,
+                        entity_type,
+                        entity_id,
+                        e,
+                    )
                     results[entity_id][feature_name] = None
 
         elapsed_time = time.time() - start_time
-        logger.info(f"Retrieved {len(entity_ids)} x {len(feature_names)} features in {elapsed_time:.3f}s "
-                   f"({cache_hits} cache hits, {computations} computations)")
+        logger.info(
+            "Retrieved %s x %s features in %.3fs (%s cache hits, %s computations)",
+            len(entity_ids),
+            len(feature_names),
+            elapsed_time,
+            cache_hits,
+            computations,
+        )
 
         return dict(results)
 
@@ -891,7 +1075,7 @@ class FeatureStore:
         features: dict[str, float | str],
         season: str = CURRENT_SEASON,
         gameweek: int | None = None,
-        invalidate_cache: bool = True
+        invalidate_cache: bool = True,
     ) -> None:
         """Update or create computed feature values."""
 
@@ -901,21 +1085,27 @@ class FeatureStore:
 
                 # Validate value
                 if not self.validator.validate_feature_value(feature_def, value):
-                    logger.warning(f"Skipping invalid value for {feature_name}: {value}")
+                    logger.warning(
+                        "Skipping invalid value for %s: %s", feature_name, value
+                    )
                     continue
 
                 # Find existing computed feature or create new
-                computed_feature = self.dbsession.query(ComputedFeature).filter_by(
-                    feature_definition_id=feature_def.id,
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    season=season,
-                    gameweek=gameweek
-                ).first()
+                computed_feature = (
+                    self.dbsession.query(ComputedFeature)
+                    .filter_by(
+                        feature_definition_id=feature_def.id,
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        season=season,
+                        gameweek=gameweek,
+                    )
+                    .first()
+                )
 
                 if computed_feature:
                     # Update existing
-                    if isinstance(value, (int, float)):
+                    if isinstance(value, int | float):
                         computed_feature.value = float(value)
                         computed_feature.string_value = None
                     else:
@@ -930,9 +1120,11 @@ class FeatureStore:
                         entity_id=entity_id,
                         gameweek=gameweek,
                         season=season,
-                        value=float(value) if isinstance(value, (int, float)) else None,
-                        string_value=str(value) if not isinstance(value, (int, float)) else None,
-                        computed_at=datetime.now().isoformat()
+                        value=float(value) if isinstance(value, int | float) else None,
+                        string_value=str(value)
+                        if not isinstance(value, int | float)
+                        else None,
+                        computed_at=datetime.now().isoformat(),
                     )
                     self.dbsession.add(computed_feature)
 
@@ -941,11 +1133,11 @@ class FeatureStore:
                     self.cache.invalidate(
                         feature_name=feature_name,
                         entity_type=entity_type,
-                        entity_id=entity_id
+                        entity_id=entity_id,
                     )
 
             except Exception as e:
-                logger.error(f"Failed to update feature {feature_name}: {e}")
+                logger.error("Failed to update feature %s: %s", feature_name, e)
 
         self.dbsession.commit()
 
@@ -956,7 +1148,7 @@ class FeatureStore:
         entity_ids: list[int] | None = None,
         season: str = CURRENT_SEASON,
         gameweek_range: tuple[int, int] | None = None,
-        chunk_size: int = 100
+        chunk_size: int = 100,
     ) -> dict[str, int]:
         """Batch compute features for multiple entities and gameweeks."""
 
@@ -965,7 +1157,8 @@ class FeatureStore:
             if entity_type == "player":
                 entity_ids = [p.player_id for p in self.dbsession.query(Player).all()]
             else:
-                raise ValueError("entity_ids must be provided for non-player entity types")
+                msg = "entity_ids must be provided for non-player entity types"
+                raise ValueError(msg)
 
         if gameweek_range is None:
             gameweek_range = (NEXT_GAMEWEEK, NEXT_GAMEWEEK)
@@ -974,12 +1167,17 @@ class FeatureStore:
         total_computations = 0
         successful_computations = 0
 
-        logger.info(f"Starting batch computation for {len(feature_names)} features, "
-                   f"{len(entity_ids)} entities, gameweeks {start_gw}-{end_gw}")
+        logger.info(
+            "Starting batch computation for %s features, %s entities, gameweeks %s-%s",
+            len(feature_names),
+            len(entity_ids),
+            start_gw,
+            end_gw,
+        )
 
         # Process in chunks to avoid memory issues
         for i in range(0, len(entity_ids), chunk_size):
-            chunk_entity_ids = entity_ids[i:i + chunk_size]
+            chunk_entity_ids = entity_ids[i : i + chunk_size]
 
             for gameweek in range(start_gw, end_gw + 1):
                 features_dict = self.get_features(
@@ -988,12 +1186,14 @@ class FeatureStore:
                     feature_names=feature_names,
                     season=season,
                     gameweek=gameweek,
-                    use_cache=False  # Force computation
+                    use_cache=False,  # Force computation
                 )
 
                 # Store computed features
                 for entity_id, features in features_dict.items():
-                    computed_features = {k: v for k, v in features.items() if v is not None}
+                    computed_features = {
+                        k: v for k, v in features.items() if v is not None
+                    }
                     if computed_features:
                         self.update_features(
                             entity_type=entity_type,
@@ -1001,21 +1201,28 @@ class FeatureStore:
                             features=computed_features,
                             season=season,
                             gameweek=gameweek,
-                            invalidate_cache=False  # Don't invalidate during batch
+                            invalidate_cache=False,  # Don't invalidate during batch
                         )
                         successful_computations += len(computed_features)
 
                     total_computations += len(features)
 
-            logger.info(f"Processed chunk {i//chunk_size + 1}/{(len(entity_ids) + chunk_size - 1)//chunk_size}")
+            logger.info(
+                "Processed chunk %s/%s",
+                i // chunk_size + 1,
+                (len(entity_ids) + chunk_size - 1) // chunk_size,
+            )
 
         stats = {
             "total_computations": total_computations,
             "successful_computations": successful_computations,
-            "failure_rate": (total_computations - successful_computations) / total_computations if total_computations > 0 else 0
+            "failure_rate": (total_computations - successful_computations)
+            / total_computations
+            if total_computations > 0
+            else 0,
         }
 
-        logger.info(f"Batch computation completed: {stats}")
+        logger.info("Batch computation completed: %s", stats)
         return stats
 
     def get_feature_stats(self, feature_name: str) -> dict[str, Any]:
@@ -1023,15 +1230,17 @@ class FeatureStore:
         feature_def = self.registry.get_feature_definition(feature_name)
 
         # Count computed values
-        value_count = self.dbsession.query(ComputedFeature).filter_by(
-            feature_definition_id=feature_def.id
-        ).count()
+        value_count = (
+            self.dbsession.query(ComputedFeature)
+            .filter_by(feature_definition_id=feature_def.id)
+            .count()
+        )
 
         # Get value distribution for numeric features
         if feature_def.data_type in ["float", "int"]:
             values_query = self.dbsession.query(ComputedFeature.value).filter(
                 ComputedFeature.feature_definition_id == feature_def.id,
-                ComputedFeature.value.isnot(None)
+                ComputedFeature.value.isnot(None),
             )
             values = [v[0] for v in values_query.all()]
 
@@ -1044,7 +1253,7 @@ class FeatureStore:
                     "max": float(np.max(values)),
                     "median": float(np.median(values)),
                     "q25": float(np.percentile(values, 25)),
-                    "q75": float(np.percentile(values, 75))
+                    "q75": float(np.percentile(values, 75)),
                 }
             else:
                 stats = {"count": 0}
@@ -1060,8 +1269,8 @@ class FeatureStore:
                 "version": feature_def.version,
                 "type": feature_def.feature_type,
                 "data_type": feature_def.data_type,
-                "description": feature_def.description
+                "description": feature_def.description,
             },
             "value_stats": stats,
-            "cache_stats": cache_stats
+            "cache_stats": cache_stats,
         }

@@ -45,10 +45,10 @@ SENSITIVE_PATTERNS = [
 def mask_sensitive_data(data: Any) -> Any:
     """
     Recursively mask sensitive data in log records.
-    
+
     Args:
         data: Data structure to mask
-        
+
     Returns:
         Data structure with sensitive fields masked
     """
@@ -60,12 +60,14 @@ def mask_sensitive_data(data: Any) -> Any:
             else:
                 masked[key] = mask_sensitive_data(value)
         return masked
-    if isinstance(data, (list, tuple)):
+    if isinstance(data, list | tuple):
         return type(data)(mask_sensitive_data(item) for item in data)
     return data
 
 
-def add_correlation_id(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def add_correlation_id(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Add correlation ID to log records."""
     correlation_id = correlation_id_var.get("")
     if correlation_id:
@@ -73,7 +75,9 @@ def add_correlation_id(logger: Any, method_name: str, event_dict: dict[str, Any]
     return event_dict
 
 
-def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def add_context(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Add context variables to log records."""
     context = context_var.get({})
     if context:
@@ -81,7 +85,9 @@ def add_context(logger: Any, method_name: str, event_dict: dict[str, Any]) -> di
     return event_dict
 
 
-def mask_sensitive_processor(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def mask_sensitive_processor(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Processor to mask sensitive data in log records."""
     return mask_sensitive_data(event_dict)
 
@@ -139,8 +145,10 @@ def setup_file_handlers() -> list[logging.Handler]:
         backupCount=5,
     )
     perf_handler.setLevel(logging.INFO)
-    perf_handler.addFilter(lambda record: hasattr(record, 'event_type') and
-                          record.event_type in ['performance', 'timing', 'metrics'])
+    perf_handler.addFilter(
+        lambda record: hasattr(record, "event_type")
+        and record.event_type in ["performance", "timing", "metrics"]
+    )
     handlers.append(perf_handler)
 
     return handlers
@@ -154,7 +162,7 @@ def configure_structlog(
 ) -> None:
     """
     Configure structlog for the application.
-    
+
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         use_colors: Whether to use colored output for console
@@ -229,10 +237,10 @@ def configure_structlog(
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """
     Get a configured logger instance.
-    
+
     Args:
         name: Logger name (typically __name__)
-        
+
     Returns:
         Configured structlog logger
     """
@@ -242,10 +250,10 @@ def get_logger(name: str) -> structlog.stdlib.BoundLogger:
 def set_correlation_id(correlation_id: str | None = None) -> str:
     """
     Set correlation ID for the current context.
-    
+
     Args:
         correlation_id: Correlation ID to set. If None, generates a new UUID4.
-        
+
     Returns:
         The correlation ID that was set
     """
@@ -264,7 +272,7 @@ def get_correlation_id() -> str:
 def set_context(**kwargs: Any) -> None:
     """
     Set context variables for the current execution.
-    
+
     Args:
         **kwargs: Key-value pairs to add to context
     """
@@ -281,13 +289,14 @@ def clear_context() -> None:
 def with_correlation_id(correlation_id: str | None = None) -> Callable:
     """
     Decorator to set correlation ID for a function.
-    
+
     Args:
         correlation_id: Correlation ID to use. If None, generates a new one.
-        
+
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -295,7 +304,7 @@ def with_correlation_id(correlation_id: str | None = None) -> Callable:
             old_correlation_id = correlation_id_var.get("")
 
             # Set new correlation ID
-            new_id = set_correlation_id(correlation_id)
+            set_correlation_id(correlation_id)
 
             try:
                 return func(*args, **kwargs)
@@ -304,19 +313,21 @@ def with_correlation_id(correlation_id: str | None = None) -> Callable:
                 correlation_id_var.set(old_correlation_id)
 
         return wrapper
+
     return decorator
 
 
 def with_context(**context_kwargs: Any) -> Callable:
     """
     Decorator to add context to a function.
-    
+
     Args:
         **context_kwargs: Context key-value pairs to add
-        
+
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -335,6 +346,7 @@ def with_context(**context_kwargs: Any) -> Callable:
                 context_var.set(old_context)
 
         return wrapper
+
     return decorator
 
 
@@ -347,17 +359,18 @@ def logged_function(
 ) -> Callable:
     """
     Decorator to add logging to function calls.
-    
+
     Args:
         logger: Logger to use. If None, creates one based on function module.
         level: Log level to use
         include_args: Whether to include function arguments in logs
         include_result: Whether to include function result in logs
         mask_args: Whether to mask sensitive arguments
-        
+
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable) -> Callable:
         nonlocal logger
         if logger is None:
@@ -393,7 +406,9 @@ def logged_function(
                 }
 
                 if include_result and result is not None:
-                    success_context["result"] = mask_sensitive_data(result) if mask_args else result
+                    success_context["result"] = (
+                        mask_sensitive_data(result) if mask_args else result
+                    )
 
                 logger.log(level, "Function completed", **success_context)
                 return result
@@ -412,6 +427,7 @@ def logged_function(
                 raise
 
         return wrapper
+
     return decorator
 
 
@@ -422,15 +438,16 @@ def timed(
 ) -> Callable:
     """
     Decorator to time function execution and log if above threshold.
-    
+
     Args:
         logger: Logger to use. If None, creates one based on function module.
         operation: Operation name for logging. If None, uses function name.
         threshold: Minimum execution time (seconds) to log
-        
+
     Returns:
         Decorator function
     """
+
     def decorator(func: Callable) -> Callable:
         nonlocal logger, operation
         if logger is None:
@@ -469,6 +486,7 @@ def timed(
                 raise
 
         return wrapper
+
     return decorator
 
 

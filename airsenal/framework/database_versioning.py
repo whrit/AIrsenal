@@ -20,10 +20,11 @@ except ImportError:
         @staticmethod
         def parse(version_string: str):
             # Simple version parsing fallback
-            parts = version_string.split('.')
+            parts = version_string.split(".")
             return SimpleVersion([int(p) for p in parts[:3] if p.isdigit()])
-    
+
     pkg_version = _FallbackPkgVersion()  # type: ignore
+
 
 class SimpleVersion:
     def __init__(self, parts: list[int]):
@@ -32,19 +33,40 @@ class SimpleVersion:
         self.micro = parts[2] if len(parts) > 2 else 0
 
     def __lt__(self, other):
-        return (self.major, self.minor, self.micro) < (other.major, other.minor, other.micro)
+        return (self.major, self.minor, self.micro) < (
+            other.major,
+            other.minor,
+            other.micro,
+        )
 
     def __le__(self, other):
-        return (self.major, self.minor, self.micro) <= (other.major, other.minor, other.micro)
+        return (self.major, self.minor, self.micro) <= (
+            other.major,
+            other.minor,
+            other.micro,
+        )
 
     def __gt__(self, other):
-        return (self.major, self.minor, self.micro) > (other.major, other.minor, other.micro)
+        return (self.major, self.minor, self.micro) > (
+            other.major,
+            other.minor,
+            other.micro,
+        )
 
     def __ge__(self, other):
-        return (self.major, self.minor, self.micro) >= (other.major, other.minor, other.micro)
+        return (self.major, self.minor, self.micro) >= (
+            other.major,
+            other.minor,
+            other.micro,
+        )
 
     def __eq__(self, other):
-        return (self.major, self.minor, self.micro) == (other.major, other.minor, other.micro)
+        return (self.major, self.minor, self.micro) == (
+            other.major,
+            other.minor,
+            other.micro,
+        )
+
 
 from sqlalchemy import desc, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -79,7 +101,7 @@ class MigrationError(Exception):
 def get_current_app_version() -> str:
     """
     Get the current application version from pyproject.toml or package metadata.
-    
+
     Returns:
         str: Current application version (e.g., "1.11.0")
     """
@@ -88,10 +110,12 @@ def get_current_app_version() -> str:
         toml_lib: Any = None
         try:
             import tomllib
+
             toml_lib = tomllib  # Python 3.11+
         except ImportError:
             try:
                 import tomli
+
                 toml_lib = tomli  # fallback for older Python
             except ImportError:
                 pass
@@ -105,13 +129,16 @@ def get_current_app_version() -> str:
             if pyproject_path.exists():
                 with open(pyproject_path, "rb") as f:
                     pyproject_data = toml_lib.load(f)
-                    return pyproject_data.get("project", {}).get("version", CURRENT_APP_VERSION)
+                    return pyproject_data.get("project", {}).get(
+                        "version", CURRENT_APP_VERSION
+                    )
     except (ImportError, FileNotFoundError, KeyError):
         pass
 
     # Fallback to package metadata
     try:
         import importlib.metadata
+
         return importlib.metadata.version("airsenal")
     except Exception:
         # Final fallback to hardcoded version
@@ -121,10 +148,10 @@ def get_current_app_version() -> str:
 def get_current_database_version(dbsession: Session) -> DatabaseVersion | None:
     """
     Get the current active database version from the database.
-    
+
     Args:
         dbsession: SQLAlchemy database session
-        
+
     Returns:
         DatabaseVersion object if found, None if no version exists
     """
@@ -145,18 +172,18 @@ def create_initial_database_version(
     app_version: str | None = None,
     schema_version: str | None = None,
     applied_by: str = "system",
-    migration_description: str = "Initial database version creation"
+    migration_description: str = "Initial database version creation",
 ) -> DatabaseVersion:
     """
     Create the initial database version record.
-    
+
     Args:
         dbsession: SQLAlchemy database session
         app_version: Application version (defaults to current)
         schema_version: Schema version (defaults to current)
         applied_by: User/system that applied the version
         migration_description: Description of the migration
-        
+
     Returns:
         DatabaseVersion object that was created
     """
@@ -182,7 +209,7 @@ def create_initial_database_version(
         validation_status="validated",
         migration_duration_seconds=0.0,
         affected_tables="all",
-        records_migrated=0
+        records_migrated=0,
     )
 
     dbsession.add(db_version)
@@ -193,18 +220,16 @@ def create_initial_database_version(
 
 
 def check_version_compatibility(
-    app_version: str,
-    schema_version: str,
-    dbsession: Session
+    app_version: str, schema_version: str, dbsession: Session
 ) -> tuple[bool, str, list[str]]:
     """
     Check if the given application and schema versions are compatible.
-    
+
     Args:
         app_version: Application version to check
         schema_version: Database schema version to check
         dbsession: SQLAlchemy database session
-        
+
     Returns:
         Tuple of (is_compatible, compatibility_level, warnings)
     """
@@ -216,7 +241,7 @@ def check_version_compatibility(
                 SchemaCompatibility.app_version_min <= app_version,
                 SchemaCompatibility.app_version_max >= app_version,
                 SchemaCompatibility.schema_version_min <= schema_version,
-                SchemaCompatibility.schema_version_max >= schema_version
+                SchemaCompatibility.schema_version_max >= schema_version,
             )
             .first()
         )
@@ -228,7 +253,9 @@ def check_version_compatibility(
             is_compatible = level in ["full", "limited"]
 
             if level == "limited":
-                warnings.append(f"Limited compatibility: {compatibility.compatibility_notes}")
+                warnings.append(
+                    f"Limited compatibility: {compatibility.compatibility_notes}"
+                )
             if compatibility.known_issues:
                 issues = json.loads(compatibility.known_issues)
                 warnings.extend([f"Known issue: {issue}" for issue in issues])
@@ -243,16 +270,15 @@ def check_version_compatibility(
 
 
 def _check_version_compatibility_fallback(
-    app_version: str,
-    schema_version: str
+    app_version: str, schema_version: str
 ) -> tuple[bool, str, list[str]]:
     """
     Fallback compatibility check using semantic versioning rules.
-    
+
     Args:
         app_version: Application version
         schema_version: Schema version
-        
+
     Returns:
         Tuple of (is_compatible, compatibility_level, warnings)
     """
@@ -265,25 +291,46 @@ def _check_version_compatibility_fallback(
 
         # Schema is too old
         if schema_ver < min_supported:
-            return False, "incompatible", ["Schema version is too old and no longer supported"]
+            return (
+                False,
+                "incompatible",
+                ["Schema version is too old and no longer supported"],
+            )
 
         # Schema is newer than app - may indicate app needs updating
         if schema_ver > app_ver:
             # Allow minor version differences
-            if schema_ver.major == app_ver.major and (schema_ver.minor - app_ver.minor) <= 2:
-                warnings.append("Schema is newer than application - consider updating the application")
+            if (
+                schema_ver.major == app_ver.major
+                and (schema_ver.minor - app_ver.minor) <= 2
+            ):
+                warnings.append(
+                    "Schema is newer than application - consider updating the application"
+                )
                 return True, "limited", warnings
-            return False, "incompatible", ["Schema version is too new for this application version"]
+            return (
+                False,
+                "incompatible",
+                ["Schema version is too new for this application version"],
+            )
 
         # App is newer than schema - check if migration is needed
         if app_ver > schema_ver:
             if app_ver.major == schema_ver.major:
                 if (app_ver.minor - schema_ver.minor) <= 3:
-                    warnings.append("Application is newer than schema - migration may be needed")
+                    warnings.append(
+                        "Application is newer than schema - migration may be needed"
+                    )
                     return True, "limited", warnings
-                warnings.append("Significant version gap - migration strongly recommended")
+                warnings.append(
+                    "Significant version gap - migration strongly recommended"
+                )
                 return True, "limited", warnings
-            return False, "incompatible", ["Major version mismatch - migration required"]
+            return (
+                False,
+                "incompatible",
+                ["Major version mismatch - migration required"],
+            )
 
         # Versions match exactly
         return True, "full", warnings
@@ -294,21 +341,19 @@ def _check_version_compatibility_fallback(
 
 
 def validate_database_on_startup(
-    dbsession: Session,
-    force_migration: bool = False,
-    error_on_mismatch: bool = True
+    dbsession: Session, force_migration: bool = False, error_on_mismatch: bool = True
 ) -> bool:
     """
     Validate database version compatibility on application startup.
-    
+
     Args:
         dbsession: SQLAlchemy database session
         force_migration: If True, attempt automatic migration
         error_on_mismatch: If True, raise error on version mismatch
-        
+
     Returns:
         bool: True if database is compatible, False otherwise
-        
+
     Raises:
         DatabaseVersionError: If versions are incompatible and error_on_mismatch is True
     """
@@ -326,7 +371,7 @@ def validate_database_on_startup(
                 app_version=current_app_ver,
                 schema_version=CURRENT_SCHEMA_VERSION,
                 applied_by="startup_validation",
-                migration_description="Initial version created during startup validation"
+                migration_description="Initial version created during startup validation",
             )
             return True
         except Exception as e:
@@ -338,9 +383,7 @@ def validate_database_on_startup(
 
     # Check compatibility
     is_compatible, level, warnings = check_version_compatibility(
-        current_app_ver,
-        db_version.schema_version,
-        dbsession
+        current_app_ver, db_version.schema_version, dbsession
     )
 
     # Log warnings
@@ -349,9 +392,13 @@ def validate_database_on_startup(
 
     if is_compatible:
         if level == "full":
-            logger.info(f"Database version {db_version.schema_version} is fully compatible with app version {current_app_ver}")
+            logger.info(
+                f"Database version {db_version.schema_version} is fully compatible with app version {current_app_ver}"
+            )
         else:
-            logger.info(f"Database version {db_version.schema_version} has {level} compatibility with app version {current_app_ver}")
+            logger.info(
+                f"Database version {db_version.schema_version} has {level} compatibility with app version {current_app_ver}"
+            )
         return True
     error_msg = (
         f"Database version {db_version.schema_version} is incompatible with "
@@ -390,11 +437,11 @@ def record_migration(
     rollback_sql: str | None = None,
     tables_affected: list[str] | None = None,
     execution_duration: float | None = None,
-    description: str | None = None
+    description: str | None = None,
 ) -> tuple[DatabaseVersion, MigrationHistory]:
     """
     Record a successful migration in the database.
-    
+
     Args:
         dbsession: SQLAlchemy database session
         migration_name: Human-readable name for the migration
@@ -409,7 +456,7 @@ def record_migration(
         tables_affected: List of table names affected
         execution_duration: Duration in seconds
         description: Migration description
-        
+
     Returns:
         Tuple of (DatabaseVersion, MigrationHistory) objects created
     """
@@ -438,7 +485,7 @@ def record_migration(
         is_active=True,
         validation_status="validated",
         migration_duration_seconds=execution_duration or 0.0,
-        affected_tables=",".join(tables_affected) if tables_affected else None
+        affected_tables=",".join(tables_affected) if tables_affected else None,
     )
 
     dbsession.add(db_version)
@@ -458,7 +505,7 @@ def record_migration(
         tables_affected=",".join(tables_affected) if tables_affected else None,
         status="success",
         rollback_sql=rollback_sql,
-        rollback_tested=False
+        rollback_tested=False,
     )
 
     dbsession.add(migration_history)
@@ -471,11 +518,11 @@ def record_migration(
 def attempt_auto_migration(dbsession: Session, target_version: str) -> bool:
     """
     Attempt automatic migration to target version.
-    
+
     Args:
         dbsession: SQLAlchemy database session
         target_version: Target application version
-        
+
     Returns:
         bool: True if migration succeeded, False otherwise
     """
@@ -492,7 +539,7 @@ def attempt_auto_migration(dbsession: Session, target_version: str) -> bool:
 def create_compatibility_matrix(dbsession: Session) -> None:
     """
     Create initial compatibility matrix with known version combinations.
-    
+
     Args:
         dbsession: SQLAlchemy database session
     """
@@ -508,7 +555,7 @@ def create_compatibility_matrix(dbsession: Session) -> None:
             "compatibility_level": "full",
             "compatibility_notes": "Current stable version",
             "migration_required": False,
-            "migration_priority": "normal"
+            "migration_priority": "normal",
         },
         {
             "app_version_min": "1.10.0",
@@ -518,8 +565,8 @@ def create_compatibility_matrix(dbsession: Session) -> None:
             "compatibility_level": "limited",
             "compatibility_notes": "Legacy version with limited feature support",
             "migration_required": True,
-            "migration_priority": "high"
-        }
+            "migration_priority": "high",
+        },
     ]
 
     for entry in compatibility_entries:
@@ -529,17 +576,13 @@ def create_compatibility_matrix(dbsession: Session) -> None:
                 app_version_min=entry["app_version_min"],
                 app_version_max=entry["app_version_max"],
                 schema_version_min=entry["schema_version_min"],
-                schema_version_max=entry["schema_version_max"]
+                schema_version_max=entry["schema_version_max"],
             )
             .first()
         )
 
         if not existing:
-            compatibility = SchemaCompatibility(
-                created_at=now,
-                updated_at=now,
-                **entry
-            )
+            compatibility = SchemaCompatibility(created_at=now, updated_at=now, **entry)
             dbsession.add(compatibility)
 
     dbsession.commit()
@@ -547,25 +590,27 @@ def create_compatibility_matrix(dbsession: Session) -> None:
 
 
 def get_migration_history(
-    dbsession: Session,
-    limit: int | None = None,
-    migration_type: str | None = None
+    dbsession: Session, limit: int | None = None, migration_type: str | None = None
 ) -> list[MigrationHistory]:
     """
     Get migration history records.
-    
+
     Args:
         dbsession: SQLAlchemy database session
         limit: Maximum number of records to return
         migration_type: Filter by migration type
-        
+
     Returns:
         List of MigrationHistory objects
     """
-    query = dbsession.query(MigrationHistory).order_by(desc(MigrationHistory.executed_at))
+    query = dbsession.query(MigrationHistory).order_by(
+        desc(MigrationHistory.executed_at)
+    )
 
     if migration_type:
-        query = query.join(DatabaseVersion).filter(DatabaseVersion.migration_type == migration_type)
+        query = query.join(DatabaseVersion).filter(
+            DatabaseVersion.migration_type == migration_type
+        )
 
     if limit:
         query = query.limit(limit)
@@ -576,10 +621,10 @@ def get_migration_history(
 def validate_schema_integrity(dbsession: Session) -> tuple[bool, list[str]]:
     """
     Validate database schema integrity.
-    
+
     Args:
         dbsession: SQLAlchemy database session
-        
+
     Returns:
         Tuple of (is_valid, error_messages)
     """
@@ -587,7 +632,11 @@ def validate_schema_integrity(dbsession: Session) -> tuple[bool, list[str]]:
 
     try:
         # Check if versioning tables exist
-        tables_to_check = ['database_version', 'migration_history', 'schema_compatibility']
+        tables_to_check = [
+            "database_version",
+            "migration_history",
+            "schema_compatibility",
+        ]
 
         for table_name in tables_to_check:
             try:
@@ -597,7 +646,9 @@ def validate_schema_integrity(dbsession: Session) -> tuple[bool, list[str]]:
                 errors.append(f"Table {table_name} is missing or corrupted: {e}")
 
         # Check for active database version
-        active_versions = dbsession.query(DatabaseVersion).filter_by(is_active=True).count()
+        active_versions = (
+            dbsession.query(DatabaseVersion).filter_by(is_active=True).count()
+        )
         if active_versions == 0:
             errors.append("No active database version found")
         elif active_versions > 1:
@@ -614,10 +665,10 @@ def validate_schema_integrity(dbsession: Session) -> tuple[bool, list[str]]:
 def get_database_info(dbsession: Session) -> dict:
     """
     Get comprehensive database version and compatibility information.
-    
+
     Args:
         dbsession: SQLAlchemy database session
-        
+
     Returns:
         Dictionary with database version information
     """
@@ -635,7 +686,7 @@ def get_database_info(dbsession: Session) -> dict:
         "migration_required": False,
         "last_migration": None,
         "schema_valid": False,
-        "schema_errors": []
+        "schema_errors": [],
     }
 
     if db_version:
@@ -644,13 +695,11 @@ def get_database_info(dbsession: Session) -> dict:
             "schema_version": db_version.schema_version,
             "applied_at": db_version.applied_at,
             "applied_by": db_version.applied_by,
-            "migration_type": db_version.migration_type
+            "migration_type": db_version.migration_type,
         }
 
         is_compatible, level, warnings = check_version_compatibility(
-            current_app_ver,
-            db_version.schema_version,
-            dbsession
+            current_app_ver, db_version.schema_version, dbsession
         )
 
         info["is_compatible"] = is_compatible
@@ -664,7 +713,7 @@ def get_database_info(dbsession: Session) -> dict:
         info["last_migration"] = {
             "name": recent_migrations[0].migration_name,
             "executed_at": recent_migrations[0].executed_at,
-            "status": recent_migrations[0].status
+            "status": recent_migrations[0].status,
         }
 
     # Validate schema

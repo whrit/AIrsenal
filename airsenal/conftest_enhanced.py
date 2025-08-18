@@ -5,9 +5,9 @@ This file extends the original conftest.py with comprehensive fixtures for
 testing all Sprint 00 enhanced components while maintaining backward compatibility.
 """
 
+import logging
 import os
 import random
-import logging
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import mkdtemp
@@ -24,17 +24,23 @@ env.AIRSENAL_HOME = Path(mkdtemp())
 from airsenal.framework.mappings import alternative_team_names  # noqa: E402
 from airsenal.framework.schema import Base, Player, PlayerAttributes  # noqa: E402
 from airsenal.framework.utils import CURRENT_SEASON  # noqa: E402
-from airsenal.tests.test_resources import dummy_players  # noqa: E402
 
 # Import comprehensive fixtures
 from airsenal.tests.fixtures.pytest_fixtures import *  # noqa: E402, F403
 from airsenal.tests.fixtures.test_database import (  # noqa: E402
-    TestDatabaseManager, TestDatabaseContext, create_test_database,
-    quick_test_database, benchmark_database, cleanup_test_databases
+    TestDatabaseContext,
+    TestDatabaseManager,
+    benchmark_database,
+    cleanup_test_databases,
+    create_test_database,
+    quick_test_database,
 )
+from airsenal.tests.test_resources import dummy_players  # noqa: E402
 
 # Configure logging for tests
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Original test constants
@@ -150,7 +156,7 @@ def fill_players():
 def test_database_manager():
     """
     Session-wide test database manager for comprehensive testing.
-    
+
     Creates a test database with standard preset data that persists
     across all tests in the session.
     """
@@ -159,11 +165,11 @@ def test_database_manager():
     db_manager.destroy_database()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def isolated_test_db():
     """
     Function-scope isolated test database.
-    
+
     Creates a fresh test database for each test function,
     ensuring complete isolation between tests.
     """
@@ -171,7 +177,7 @@ def isolated_test_db():
         yield db_manager
 
 
-@pytest.fixture(scope="function") 
+@pytest.fixture
 def performance_test_db():
     """
     Performance-optimized test database for benchmarking tests.
@@ -185,7 +191,7 @@ def performance_test_db():
 def module_test_db():
     """
     Module-scope test database that persists for all tests in a module.
-    
+
     Useful for expensive setup that can be shared within a test module.
     """
     db_manager = create_test_database(preset="standard")
@@ -194,27 +200,35 @@ def module_test_db():
 
 
 # Enhanced session management with comprehensive data
-@pytest.fixture(scope="function")
+@pytest.fixture
 def enhanced_session(test_session):
     """
     Enhanced database session with comprehensive test data.
-    
+
     Builds on the basic test_session fixture to provide access to
     comprehensive test data including extended player attributes,
     model versioning, feature store, and database versioning data.
     """
     # Configure factory_boy to use this session
     from airsenal.tests.fixtures import (
-        player_factories, model_factories, feature_factories, database_factories
+        database_factories,
+        feature_factories,
+        model_factories,
+        player_factories,
     )
-    
-    for factory_module in [player_factories, model_factories, feature_factories, database_factories]:
+
+    for factory_module in [
+        player_factories,
+        model_factories,
+        feature_factories,
+        database_factories,
+    ]:
         for name in dir(factory_module):
             obj = getattr(factory_module, name)
-            if hasattr(obj, '_meta') and hasattr(obj._meta, 'sqlalchemy_session'):
+            if hasattr(obj, "_meta") and hasattr(obj._meta, "sqlalchemy_session"):
                 obj._meta.sqlalchemy_session = test_session
-    
-    yield test_session
+
+    return test_session
 
 
 # Test data scenarios for specific testing needs
@@ -222,31 +236,35 @@ def enhanced_session(test_session):
 def basic_test_scenario(enhanced_session):
     """
     Basic test scenario with minimal realistic data.
-    
+
     Includes:
     - 20 players with extended attributes
     - 1 model family with 3 versions
     - Basic feature definitions
     """
-    from airsenal.tests.fixtures.player_factories import create_gameweek_players
-    from airsenal.tests.fixtures.model_factories import create_model_family
     from airsenal.tests.fixtures.feature_factories import FeatureDefinitionFactory
-    
+    from airsenal.tests.fixtures.model_factories import create_model_family
+    from airsenal.tests.fixtures.player_factories import create_gameweek_players
+
     # Create players
-    players = create_gameweek_players(enhanced_session, season="2324", gameweek=10, num_players=20)
-    
+    players = create_gameweek_players(
+        enhanced_session, season="2324", gameweek=10, num_players=20
+    )
+
     # Create model family
-    model_family = create_model_family(enhanced_session, model_name="test_model", num_versions=3)
-    
+    model_family = create_model_family(
+        enhanced_session, model_name="test_model", num_versions=3
+    )
+
     # Create feature definitions
     features = [
         FeatureDefinitionFactory(name="rolling_goals_5"),
         FeatureDefinitionFactory(name="xg_form_3"),
         FeatureDefinitionFactory(name="team_strength"),
     ]
-    
+
     enhanced_session.commit()
-    
+
     return {
         "players": players,
         "model_family": model_family,
@@ -259,22 +277,23 @@ def basic_test_scenario(enhanced_session):
 def transfer_optimization_scenario(enhanced_session, mock_fpl_fetcher):
     """
     Complete transfer optimization test scenario.
-    
+
     Includes current squad, transfer targets, form analysis players,
     and mock FPL data fetcher.
     """
     from airsenal.tests.fixtures.player_factories import (
-        create_squad_players, create_form_comparison_players
+        create_form_comparison_players,
+        create_squad_players,
     )
-    
+
     # Create current squad
     current_squad = create_squad_players(enhanced_session, num_players=15)
-    
+
     # Create form analysis players
     form_players = create_form_comparison_players(enhanced_session)
-    
+
     enhanced_session.commit()
-    
+
     return {
         "current_squad": current_squad,
         "form_players": form_players,
@@ -290,22 +309,23 @@ def transfer_optimization_scenario(enhanced_session, mock_fpl_fetcher):
 def model_testing_scenario(enhanced_session, temp_storage_dir):
     """
     Model testing scenario with versioning and A/B testing.
-    
+
     Includes model families, A/B tests, development pipeline,
     and temporary storage for model artifacts.
     """
     from airsenal.tests.fixtures.model_factories import (
-        create_model_development_pipeline, create_ab_test_scenario
+        create_ab_test_scenario,
+        create_model_development_pipeline,
     )
-    
+
     # Create development pipeline
     pipeline = create_model_development_pipeline(enhanced_session)
-    
+
     # Create A/B test scenario
     ab_test = create_ab_test_scenario(enhanced_session)
-    
+
     enhanced_session.commit()
-    
+
     return {
         "pipeline": pipeline,
         "ab_test": ab_test,
@@ -320,22 +340,24 @@ def model_testing_scenario(enhanced_session, temp_storage_dir):
 def feature_engineering_scenario(enhanced_session, mock_redis_cache):
     """
     Feature engineering scenario with computation and caching.
-    
+
     Includes feature definitions, computed features, cache entries,
     and mock Redis cache.
     """
-    from airsenal.tests.fixtures.feature_factories import create_feature_computation_pipeline
-    
+    from airsenal.tests.fixtures.feature_factories import (
+        create_feature_computation_pipeline,
+    )
+
     # Create feature computation pipeline
     pipeline = create_feature_computation_pipeline(enhanced_session)
-    
+
     # Preload cache with computed features
-    for i, computed in enumerate(pipeline["computed_features"][:10]):
+    for _i, computed in enumerate(pipeline["computed_features"][:10]):
         cache_key = f"feature:{computed.feature_definition.name}:{computed.entity_id}:gw{computed.gameweek or 'latest'}"
         mock_redis_cache.set(cache_key, str(computed.value), ex=3600)
-    
+
     enhanced_session.commit()
-    
+
     return {
         "pipeline": pipeline,
         "cache": mock_redis_cache,
@@ -360,12 +382,12 @@ def multi_gameweek_scenario(request, enhanced_session):
     """Parameterized fixture for testing different gameweek scenarios."""
     gameweek = request.param
     from airsenal.tests.fixtures.player_factories import create_gameweek_players
-    
+
     players = create_gameweek_players(
         enhanced_session, season="2324", gameweek=gameweek, num_players=30
     )
     enhanced_session.commit()
-    
+
     return {
         "gameweek": gameweek,
         "players": players,
@@ -378,26 +400,26 @@ def multi_gameweek_scenario(request, enhanced_session):
 def stress_test_scenario(enhanced_session):
     """
     High-volume data scenario for stress testing.
-    
+
     Creates large datasets to test performance and scalability.
     """
-    from airsenal.tests.fixtures.player_factories import PlayerAttributesExtendedFactory
     from airsenal.tests.fixtures.feature_factories import FeatureCacheFactory
-    
+    from airsenal.tests.fixtures.player_factories import PlayerAttributesExtendedFactory
+
     # Create many players
     players = []
     for i in range(100):  # 100 players
         attrs = PlayerAttributesExtendedFactory()
         players.append(attrs)
-    
+
     # Create many cache entries
     cache_entries = []
     for i in range(500):  # 500 cache entries
         cache = FeatureCacheFactory(entity_id=i % 100 + 1)
         cache_entries.append(cache)
-    
+
     enhanced_session.commit()
-    
+
     return {
         "players": players,
         "cache_entries": cache_entries,
@@ -447,7 +469,7 @@ def test_environment_config():
             "strict_mode": True,
             "performance_monitoring": True,
             "data_validation": True,
-        }
+        },
     }
 
 
@@ -456,33 +478,34 @@ def test_environment_config():
 def session_cleanup():
     """
     Automatic session-wide cleanup.
-    
+
     Ensures test resources are properly cleaned up at the end of the test session.
     """
     yield
     # Cleanup after all tests complete
     cleanup_test_databases()
-    
+
     # Clean up temporary directories
     import shutil
+
     try:
         shutil.rmtree(env.AIRSENAL_HOME, ignore_errors=True)
     except Exception as e:
         logger.warning(f"Could not clean up AIRSENAL_HOME: {e}")
 
 
-@pytest.fixture(autouse=True, scope="function")
+@pytest.fixture(autouse=True)
 def function_cleanup():
     """
     Automatic function-wide cleanup.
-    
+
     Ensures each test function starts with a clean state.
     """
     # Pre-test setup
     logger.debug("Starting test function")
-    
+
     yield
-    
+
     # Post-test cleanup
     logger.debug("Completing test function")
 
@@ -492,51 +515,73 @@ def function_cleanup():
 def data_validators():
     """
     Data validation functions for testing.
-    
+
     Provides validation functions to ensure test data meets expected criteria.
     """
+
     def validate_player_attributes(attrs):
         """Validate player attributes have required fields and realistic values."""
-        required_fields = ["player_id", "season", "gameweek", "position", "team", "price"]
+        required_fields = [
+            "player_id",
+            "season",
+            "gameweek",
+            "position",
+            "team",
+            "price",
+        ]
         for field in required_fields:
             assert hasattr(attrs, field), f"Missing required field: {field}"
             assert getattr(attrs, field) is not None, f"Field {field} cannot be None"
-        
+
         # Validate extended fields if present
         if hasattr(attrs, "xg_per_90") and attrs.xg_per_90 is not None:
             assert 0 <= attrs.xg_per_90 <= 2.0, "xG per 90 should be between 0 and 2.0"
-        
+
         if hasattr(attrs, "form_3_games") and attrs.form_3_games is not None:
             assert 0 <= attrs.form_3_games <= 20.0, "Form should be between 0 and 20.0"
-        
+
         if hasattr(attrs, "price") and attrs.price is not None:
-            assert 30 <= attrs.price <= 200, "Price should be between 3.0 and 20.0 million"
-    
+            assert 30 <= attrs.price <= 200, (
+                "Price should be between 3.0 and 20.0 million"
+            )
+
     def validate_fpl_squad(squad):
         """Validate FPL squad composition."""
-        positions = [player.position("2324") for player in squad if player.position("2324")]
-        position_counts = {pos: positions.count(pos) for pos in ["GK", "DEF", "MID", "FWD"]}
-        
+        positions = [
+            player.position("2324") for player in squad if player.position("2324")
+        ]
+        position_counts = {
+            pos: positions.count(pos) for pos in ["GK", "DEF", "MID", "FWD"]
+        }
+
         assert position_counts.get("GK", 0) == 2, "Squad must have 2 goalkeepers"
         assert position_counts.get("DEF", 0) == 5, "Squad must have 5 defenders"
         assert position_counts.get("MID", 0) == 5, "Squad must have 5 midfielders"
         assert position_counts.get("FWD", 0) == 3, "Squad must have 3 forwards"
-    
+
     def validate_model_version(version):
         """Validate model version has required metadata."""
         assert version.version is not None, "Version must have version number"
         assert version.training_date is not None, "Version must have training date"
-        assert version.status in ["ready", "training", "deployed", "deprecated", "failed"]
-        
+        assert version.status in [
+            "ready",
+            "training",
+            "deployed",
+            "deprecated",
+            "failed",
+        ]
+
         if version.is_production:
-            assert version.status in ["deployed", "ready"], "Production models should be deployed or ready"
-    
+            assert version.status in ["deployed", "ready"], (
+                "Production models should be deployed or ready"
+            )
+
     def validate_feature_definition(definition):
         """Validate feature definition."""
         assert definition.name is not None, "Feature must have a name"
         assert definition.feature_type in ["player", "team", "fixture", "external"]
         assert definition.data_type in ["float", "int", "boolean", "string"]
-    
+
     return {
         "player_attributes": validate_player_attributes,
         "fpl_squad": validate_fpl_squad,
@@ -550,7 +595,7 @@ def data_validators():
 def legacy_session():
     """
     Legacy session fixture for backward compatibility.
-    
+
     Provides the same interface as the original session_scope context manager
     but as a pytest fixture.
     """
@@ -574,22 +619,20 @@ pytest_plugins = [
 
 # Export key functions for direct use
 __all__ = [
-    # Original functions
-    "session_scope",
-    "past_data_session_scope", 
-    "value_generator",
-    
-    # Test database management
-    "TestDatabaseManager",
-    "TestDatabaseContext",
-    "create_test_database",
-    "quick_test_database",
-    "benchmark_database",
-    "cleanup_test_databases",
-    
     # Constants
     "API_SESSION_ID",
     "TEST_PAST_SEASON",
+    "TestDatabaseContext",
+    # Test database management
+    "TestDatabaseManager",
+    "benchmark_database",
+    "cleanup_test_databases",
+    "create_test_database",
+    "past_data_session_scope",
+    "quick_test_database",
+    # Original functions
+    "session_scope",
     "testengine_dummy",
     "testengine_past",
+    "value_generator",
 ]

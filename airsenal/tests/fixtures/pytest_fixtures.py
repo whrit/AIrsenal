@@ -5,42 +5,58 @@ Provides comprehensive pytest fixtures that combine factories and mock services
 for easy testing of AIrsenal components.
 """
 
-import pytest
-import tempfile
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
+from unittest.mock import Mock, patch
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import patch, Mock
 
 from airsenal.framework.schema import Base
-from .player_factories import (
-    PlayerFactory, PlayerAttributesExtendedFactory, GoalkeeperAttributesFactory,
-    DefenderAttributesFactory, MidfielderAttributesFactory, ForwardAttributesFactory,
-    create_squad_players, create_gameweek_players, create_form_comparison_players
-)
-from .model_factories import (
-    ModelRegistryFactory, ModelVersionFactory, ProductionModelVersionFactory,
-    create_model_family, create_ab_test_scenario, create_model_development_pipeline
+
+from .database_factories import (
+    MigrationHistoryFactory,
+    create_compatibility_matrix,
+    create_migration_timeline,
 )
 from .feature_factories import (
-    FeatureDefinitionFactory, ComputedFeatureFactory, FeatureCacheFactory,
-    create_feature_computation_pipeline, create_player_feature_timeline
-)
-from .database_factories import (
-    DatabaseVersionFactory, MigrationHistoryFactory, SchemaCompatibilityFactory,
-    create_migration_timeline, create_compatibility_matrix
+    ComputedFeatureFactory,
+    FeatureCacheFactory,
+    FeatureDefinitionFactory,
+    create_feature_computation_pipeline,
+    create_player_feature_timeline,
 )
 from .mock_services import (
-    MockFPLDataFetcher, MockRedisCache, MockPlayerModel, MockLogHandler,
-    create_mock_fpl_fetcher, create_mock_redis_cache, create_mock_player_models,
-    create_mock_log_scenario
+    create_mock_fpl_fetcher,
+    create_mock_log_scenario,
+    create_mock_player_models,
+    create_mock_redis_cache,
+)
+from .model_factories import (
+    ModelRegistryFactory,
+    ModelVersionFactory,
+    ProductionModelVersionFactory,
+    create_ab_test_scenario,
+    create_model_development_pipeline,
+    create_model_family,
+)
+from .player_factories import (
+    DefenderAttributesFactory,
+    ForwardAttributesFactory,
+    GoalkeeperAttributesFactory,
+    MidfielderAttributesFactory,
+    PlayerAttributesExtendedFactory,
+    create_form_comparison_players,
+    create_gameweek_players,
+    create_squad_players,
 )
 
 
 # Database and session fixtures
-@pytest.fixture(scope="function")
+@pytest.fixture
 def test_db_engine():
     """Create an in-memory SQLite database for testing."""
     engine = create_engine("sqlite:///:memory:", echo=False)
@@ -49,26 +65,36 @@ def test_db_engine():
     engine.dispose()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def test_session(test_db_engine):
     """Create a database session for testing."""
     SessionLocal = sessionmaker(bind=test_db_engine)
     session = SessionLocal()
-    
+
     # Configure factory_boy to use this session
-    from . import player_factories, model_factories, feature_factories, database_factories
-    
-    for factory_module in [player_factories, model_factories, feature_factories, database_factories]:
+    from . import (
+        database_factories,
+        feature_factories,
+        model_factories,
+        player_factories,
+    )
+
+    for factory_module in [
+        player_factories,
+        model_factories,
+        feature_factories,
+        database_factories,
+    ]:
         for name in dir(factory_module):
             obj = getattr(factory_module, name)
-            if hasattr(obj, '_meta') and hasattr(obj._meta, 'sqlalchemy_session'):
+            if hasattr(obj, "_meta") and hasattr(obj._meta, "sqlalchemy_session"):
                 obj._meta.sqlalchemy_session = session
-    
+
     yield session
     session.close()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def temp_storage_dir():
     """Create temporary directory for file storage during tests."""
     temp_dir = Path(tempfile.mkdtemp())
@@ -82,17 +108,17 @@ def sample_players(test_session):
     """Create a set of sample players with extended attributes."""
     players = []
     for position in ["GK", "DEF", "MID", "FWD"]:
-        for i in range(3):  # 3 players per position
+        for _i in range(3):  # 3 players per position
             factory_class = {
                 "GK": GoalkeeperAttributesFactory,
                 "DEF": DefenderAttributesFactory,
                 "MID": MidfielderAttributesFactory,
                 "FWD": ForwardAttributesFactory,
             }[position]
-            
+
             attrs = factory_class()
             players.append(attrs.player)
-    
+
     return players
 
 
@@ -105,7 +131,9 @@ def fpl_squad(test_session):
 @pytest.fixture
 def gameweek_players(test_session):
     """Create players for a specific gameweek scenario."""
-    return create_gameweek_players(test_session, season="2324", gameweek=10, num_players=30)
+    return create_gameweek_players(
+        test_session, season="2324", gameweek=10, num_players=30
+    )
 
 
 @pytest.fixture
@@ -126,22 +154,24 @@ def model_versions(test_session, model_registry):
     """Create multiple versions of a model."""
     versions = []
     for i, version in enumerate(["1.0.0", "1.1.0", "1.2.0", "2.0.0"]):
-        is_production = (i == 2)  # Make version 1.2.0 production
-        
+        is_production = i == 2  # Make version 1.2.0 production
+
         if is_production:
             mv = ProductionModelVersionFactory(registry=model_registry, version=version)
         else:
             mv = ModelVersionFactory(registry=model_registry, version=version)
-        
+
         versions.append(mv)
-    
+
     return versions
 
 
 @pytest.fixture
 def model_family(test_session):
     """Create a complete model family with versions, artifacts, and performance data."""
-    return create_model_family(test_session, model_name="transfer_optimizer", num_versions=5)
+    return create_model_family(
+        test_session, model_name="transfer_optimizer", num_versions=5
+    )
 
 
 @pytest.fixture
@@ -161,7 +191,12 @@ def model_pipeline(test_session):
 def feature_definitions(test_session):
     """Create sample feature definitions."""
     features = []
-    for feature_name in ["rolling_goals_5", "xg_form_3", "team_attack_strength", "fixture_difficulty"]:
+    for feature_name in [
+        "rolling_goals_5",
+        "xg_form_3",
+        "team_attack_strength",
+        "fixture_difficulty",
+    ]:
         feature = FeatureDefinitionFactory(name=feature_name)
         features.append(feature)
     return features
@@ -174,8 +209,7 @@ def computed_features(test_session, feature_definitions):
     for definition in feature_definitions:
         for entity_id in range(1, 11):  # 10 entities per feature
             feature = ComputedFeatureFactory(
-                feature_definition=definition,
-                entity_id=entity_id
+                feature_definition=definition, entity_id=entity_id
             )
             computed.append(feature)
     return computed
@@ -187,10 +221,7 @@ def feature_cache_entries(test_session):
     cache_entries = []
     for feature_name in ["rolling_goals_5", "xg_form_3", "team_recent_form_5"]:
         for entity_id in range(1, 21):  # 20 entities per feature
-            cache = FeatureCacheFactory(
-                feature_name=feature_name,
-                entity_id=entity_id
-            )
+            cache = FeatureCacheFactory(feature_name=feature_name, entity_id=entity_id)
             cache_entries.append(cache)
     return cache_entries
 
@@ -211,7 +242,9 @@ def player_timeline(test_session):
 @pytest.fixture
 def database_versions(test_session):
     """Create a series of database versions."""
-    return create_migration_timeline(test_session, start_version="1.0.0", num_versions=5)
+    return create_migration_timeline(
+        test_session, start_version="1.0.0", num_versions=5
+    )
 
 
 @pytest.fixture
@@ -221,8 +254,7 @@ def migration_history(test_session, database_versions):
     for version in database_versions:
         for i in range(2):  # 2 migrations per version
             migration = MigrationHistoryFactory(
-                database_version=version,
-                sequence_number=i + 1
+                database_version=version, sequence_number=i + 1
             )
             history.append(migration)
     return history
@@ -276,18 +308,18 @@ def mock_logging_scenario():
 def fpl_season_scenario(test_session, mock_fpl_fetcher):
     """Create a complete FPL season scenario with players, fixtures, and data."""
     # Create players for the season
-    players = create_gameweek_players(test_session, season="2324", gameweek=1, num_players=100)
-    
+    players = create_gameweek_players(
+        test_session, season="2324", gameweek=1, num_players=100
+    )
+
     # Create feature timeline for top players
     feature_timelines = {}
-    for i, player_attrs in enumerate(players[:10]):  # Top 10 players
+    for _i, player_attrs in enumerate(players[:10]):  # Top 10 players
         timeline = create_player_feature_timeline(
-            test_session, 
-            player_id=player_attrs.player_id, 
-            season="2324"
+            test_session, player_id=player_attrs.player_id, season="2324"
         )
         feature_timelines[player_attrs.player_id] = timeline
-    
+
     return {
         "players": players,
         "fetcher": mock_fpl_fetcher,
@@ -302,14 +334,14 @@ def model_deployment_scenario(test_session, temp_storage_dir):
     """Create a model deployment scenario with versioning and A/B testing."""
     # Create model development pipeline
     pipeline = create_model_development_pipeline(test_session)
-    
+
     # Create A/B test
     ab_test = create_ab_test_scenario(test_session)
-    
+
     # Create model storage directory structure
     model_dir = temp_storage_dir / "models"
     model_dir.mkdir()
-    
+
     return {
         "pipeline": pipeline,
         "ab_test": ab_test,
@@ -324,12 +356,12 @@ def feature_engineering_scenario(test_session, mock_redis_cache):
     """Create a feature engineering scenario with computation and caching."""
     # Create feature computation pipeline
     pipeline = create_feature_computation_pipeline(test_session)
-    
+
     # Preload cache with some computed features
-    for i, computed in enumerate(pipeline["computed_features"][:5]):
+    for _i, computed in enumerate(pipeline["computed_features"][:5]):
         cache_key = f"feature:{computed.feature_definition.name}:{computed.entity_id}:{computed.gameweek or 'latest'}"
         mock_redis_cache.set(cache_key, str(computed.value), ex=3600)
-    
+
     return {
         "feature_pipeline": pipeline,
         "cache": mock_redis_cache,
@@ -340,17 +372,19 @@ def feature_engineering_scenario(test_session, mock_redis_cache):
 
 
 @pytest.fixture
-def transfer_optimization_scenario(test_session, mock_fpl_fetcher, form_analysis_players):
+def transfer_optimization_scenario(
+    test_session, mock_fpl_fetcher, form_analysis_players
+):
     """Create a transfer optimization scenario."""
     # Create current squad
     current_squad = create_squad_players(test_session, num_players=15)
-    
+
     # Create transfer targets (high form players)
     transfer_targets = form_analysis_players["high_form"]
-    
+
     # Create players to transfer out (low form players)
     transfer_candidates = form_analysis_players["low_form"]
-    
+
     return {
         "current_squad": current_squad,
         "transfer_targets": transfer_targets,
@@ -374,17 +408,17 @@ def performance_testing_scenario(test_session, mock_redis_cache):
                 "MID": MidfielderAttributesFactory,
                 "FWD": ForwardAttributesFactory,
             }[position]
-            
+
             attrs = factory_class()
             players.append(attrs)
-    
+
     # Create feature cache entries for performance testing
     for i in range(1000):  # 1000 cache entries
-        cache_entry = FeatureCacheFactory(
+        FeatureCacheFactory(
             entity_id=i % 100 + 1,  # Distribute across 100 entities
             hit_count=i % 50,  # Vary hit counts
         )
-    
+
     return {
         "players": players,
         "cache": mock_redis_cache,
@@ -404,7 +438,7 @@ def position_specific_player(request, test_session):
         "MID": MidfielderAttributesFactory,
         "FWD": ForwardAttributesFactory,
     }[position]
-    
+
     return factory_class()
 
 
@@ -420,7 +454,9 @@ def form_scenario_players(request, test_session):
 def gameweek_scenario(request, test_session):
     """Create scenarios for different gameweeks (parameterized)."""
     gameweek = request.param
-    return create_gameweek_players(test_session, season="2324", gameweek=gameweek, num_players=20)
+    return create_gameweek_players(
+        test_session, season="2324", gameweek=gameweek, num_players=20
+    )
 
 
 # Configuration fixtures
@@ -452,7 +488,7 @@ def test_config():
         "logging": {
             "level": "DEBUG",
             "capture": True,
-        }
+        },
     }
 
 
@@ -460,7 +496,7 @@ def test_config():
 @pytest.fixture(autouse=True)
 def cleanup_test_data():
     """Automatically cleanup test data after each test."""
-    yield
+    return
     # Cleanup code runs after each test
     # This is where you could add any global cleanup logic
 
@@ -478,7 +514,7 @@ def benchmark_data(test_session):
             gameweek=15,
         )
         players.append(attrs)
-    
+
     return {
         "players": players,
         "count": len(players),
@@ -497,7 +533,7 @@ def session_config():
         "global_settings": {
             "strict_mode": True,
             "performance_monitoring": True,
-        }
+        },
     }
 
 
@@ -530,7 +566,7 @@ def error_scenarios():
 @pytest.fixture
 def mock_external_apis():
     """Mock all external API calls."""
-    with patch('airsenal.framework.data_fetcher.requests.Session') as mock_session:
+    with patch("airsenal.framework.data_fetcher.requests.Session") as mock_session:
         mock_session.return_value.get.return_value.json.return_value = {"mock": "data"}
         mock_session.return_value.get.return_value.status_code = 200
         yield mock_session
@@ -539,7 +575,7 @@ def mock_external_apis():
 @pytest.fixture
 def mock_file_operations(temp_storage_dir):
     """Mock file operations to use temporary directory."""
-    with patch('pathlib.Path.home') as mock_home:
+    with patch("pathlib.Path.home") as mock_home:
         mock_home.return_value = temp_storage_dir
         yield temp_storage_dir
 
@@ -548,29 +584,38 @@ def mock_file_operations(temp_storage_dir):
 @pytest.fixture
 def data_validators():
     """Provide data validation functions for testing."""
+
     def validate_player_attributes(attrs):
         """Validate player attributes have required fields."""
         required_fields = ["player_id", "season", "gameweek", "position", "team"]
         for field in required_fields:
             assert hasattr(attrs, field), f"Missing required field: {field}"
             assert getattr(attrs, field) is not None, f"Field {field} cannot be None"
-    
+
     def validate_fpl_squad(squad):
         """Validate FPL squad composition."""
         positions = [player.position("2324") for player in squad]
-        position_counts = {pos: positions.count(pos) for pos in ["GK", "DEF", "MID", "FWD"]}
-        
+        position_counts = {
+            pos: positions.count(pos) for pos in ["GK", "DEF", "MID", "FWD"]
+        }
+
         assert position_counts["GK"] == 2, "Squad must have 2 goalkeepers"
         assert position_counts["DEF"] == 5, "Squad must have 5 defenders"
         assert position_counts["MID"] == 5, "Squad must have 5 midfielders"
         assert position_counts["FWD"] == 3, "Squad must have 3 forwards"
-    
+
     def validate_model_version(version):
         """Validate model version has required metadata."""
         assert version.version is not None, "Version must have version number"
         assert version.training_date is not None, "Version must have training date"
-        assert version.status in ["ready", "training", "deployed", "deprecated", "failed"]
-    
+        assert version.status in [
+            "ready",
+            "training",
+            "deployed",
+            "deprecated",
+            "failed",
+        ]
+
     return {
         "player_attributes": validate_player_attributes,
         "fpl_squad": validate_fpl_squad,

@@ -8,13 +8,13 @@ from bpl import ExtendedDixonColesMatchPredictor, NeutralDixonColesMatchPredicto
 from sqlalchemy.orm.session import Session
 from tqdm import TqdmWarning
 
+from airsenal.framework.database_versioning import (
+    DatabaseVersionError,
+    validate_database_on_startup,
+)
 from airsenal.framework.multiprocessing_utils import set_multiprocessing_start_method
 from airsenal.framework.random_team_model import RandomMatchPredictor
 from airsenal.framework.schema import session_scope
-from airsenal.framework.database_versioning import (
-    validate_database_on_startup,
-    DatabaseVersionError
-)
 from airsenal.framework.utils import (
     CURRENT_SEASON,
     NEXT_GAMEWEEK,
@@ -180,20 +180,28 @@ def run_pipeline(
             version_compatible = validate_database_on_startup(
                 dbsession=dbsession,
                 force_migration=False,  # Don't auto-migrate in pipeline
-                error_on_mismatch=True  # Fail fast on version mismatch
+                error_on_mismatch=True,  # Fail fast on version mismatch
             )
             if not version_compatible:
-                click.echo("ERROR: Database version is incompatible with application version.", err=True)
-                click.echo("Please run migration or use a compatible database version.", err=True)
+                click.echo(
+                    "ERROR: Database version is incompatible with application version.",
+                    err=True,
+                )
+                click.echo(
+                    "Please run migration or use a compatible database version.",
+                    err=True,
+                )
                 return
         except DatabaseVersionError as e:
             click.echo(f"ERROR: Database version validation failed: {e}", err=True)
-            click.echo("Please check your database version and migrate if necessary.", err=True)
+            click.echo(
+                "Please check your database version and migrate if necessary.", err=True
+            )
             return
         except Exception as e:
             click.echo(f"WARNING: Could not validate database version: {e}", err=True)
             click.echo("Continuing with pipeline execution...", err=True)
-        
+
         if check_clean_db(clean, dbsession):
             click.echo("Setting up Database..")
             setup_ok = setup_database(
