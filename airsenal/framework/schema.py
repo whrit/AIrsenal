@@ -579,6 +579,10 @@ class ModelVersion(Base):
     experiments: Mapped[list["ModelExperiment"]] = relationship(
         back_populates="model_version", foreign_keys="ModelExperiment.model_version_id"
     )
+    checkpoints: Mapped[list["ModelCheckpoint"]] = relationship(back_populates="model_version")
+    metadata: Mapped[list["ModelMetadata"]] = relationship(
+        back_populates="model_version", foreign_keys="ModelMetadata.version_id"
+    )
 
     def __str__(self):
         return f"ModelVersion({self.model_registry.model_name} v{self.version})"
@@ -688,6 +692,158 @@ class ModelExperiment(Base):
 
     def __str__(self):
         return f"ModelExperiment({self.experiment_name}: {self.status})"
+
+
+class ModelCheckpoint(Base):
+    """Storage for complete model checkpoints with persistence layer integration"""
+
+    __tablename__ = "model_checkpoint"
+
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("model_version.id"))
+    checkpoint_name: Mapped[str100]  # "auto_checkpoint_001", "pre_training", "best_validation"
+    checkpoint_type: Mapped[str100]  # "automatic", "manual", "milestone", "recovery"
+    
+    # Model state storage
+    model_data: Mapped[bytes | None] = mapped_column(LargeBinary)  # Compressed model state
+    compression_format: Mapped[str100] = mapped_column(default="gzip")  # "gzip", "bz2", "lzma", "none"
+    original_size_bytes: Mapped[int | None]
+    compressed_size_bytes: Mapped[int | None]
+    
+    # Integrity verification
+    checksum: Mapped[str100]  # SHA256 hash for integrity verification
+    checksum_algorithm: Mapped[str100] = mapped_column(default="sha256")
+    
+    # Storage metadata
+    file_path: Mapped[str | None] = mapped_column(String(500))  # Local file path
+    cloud_path: Mapped[str | None] = mapped_column(String(500))  # S3/GCS/Azure path
+    storage_backend: Mapped[str100] = mapped_column(default="database")  # "database", "file", "s3", "gcs", "azure"
+    
+    # Checkpoint metadata
+    created_at: Mapped[str100]  # ISO datetime string
+    created_by: Mapped[str100 | None]  # User or system that created checkpoint
+    gameweek: Mapped[int | None]  # Gameweek when checkpoint was created
+    season: Mapped[str100 | None]  # Season when checkpoint was created
+    tags: Mapped[str | None] = mapped_column(String(500))  # Comma-separated tags
+    description: Mapped[str | None] = mapped_column(String(1000))
+    
+    # Performance metrics at checkpoint time
+    validation_score: Mapped[float | None]
+    training_loss: Mapped[float | None]
+    model_size_mb: Mapped[float | None]
+    
+    # Status and lifecycle
+    status: Mapped[str100] = mapped_column(default="active")  # "active", "archived", "corrupted", "deleted"
+    is_recoverable: Mapped[bool] = mapped_column(default=True)
+    recovery_priority: Mapped[int] = mapped_column(default=1)  # 1-10 scale for recovery importance
+    
+    # Relationships
+    model_version: Mapped["ModelVersion"] = relationship()
+    model_states: Mapped[list["ModelState"]] = relationship(back_populates="checkpoint")
+
+    def __str__(self):
+        return f"ModelCheckpoint({self.checkpoint_name} for {self.model_version})"
+
+
+class ModelState(Base):
+    """Individual player model states for granular persistence and recovery"""
+
+    __tablename__ = "model_state"
+
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    checkpoint_id: Mapped[int] = mapped_column(ForeignKey("model_checkpoint.id"))
+    player_id: Mapped[int] = mapped_column(ForeignKey("player.id"))
+    
+    # State vector and covariance data
+    state_mean: Mapped[bytes | None] = mapped_column(LargeBinary)  # Serialized state mean vector
+    state_covariance: Mapped[bytes | None] = mapped_column(LargeBinary)  # Serialized covariance matrix
+    state_history: Mapped[bytes | None] = mapped_column(LargeBinary)  # Compressed state history
+    
+    # State metadata
+    state_dimension: Mapped[int]  # Dimensionality of state vector
+    gameweek: Mapped[int]
+    season: Mapped[str100]
+    last_updated: Mapped[str100]  # ISO datetime string
+    
+    # Serialization metadata
+    serialization_format: Mapped[str100] = mapped_column(default="numpy")  # "numpy", "pickle", "json"
+    compression_used: Mapped[bool] = mapped_column(default=True)
+    
+    # State validation
+    state_checksum: Mapped[str100]  # Checksum for individual state integrity
+    is_valid: Mapped[bool] = mapped_column(default=True)
+    validation_errors: Mapped[str | None] = mapped_column(String(1000))
+    
+    # Performance tracking
+    prediction_accuracy: Mapped[float | None]  # Recent prediction accuracy for this player
+    uncertainty_score: Mapped[float | None]  # Measure of state uncertainty
+    update_frequency: Mapped[int] = mapped_column(default=0)  # Number of times state has been updated
+    
+    # Relationships
+    checkpoint: Mapped["ModelCheckpoint"] = relationship(back_populates="model_states")
+    player: Mapped["Player"] = relationship()
+
+    def __str__(self):
+        return f"ModelState(Player {self.player_id} @ GW{self.gameweek})"
+
+
+class ModelMetadata(Base):
+    """Extended metadata for model configurations and performance tracking"""
+
+    __tablename__ = "model_metadata"
+
+    id: Mapped[intpk] = mapped_column(autoincrement=True)
+    version_id: Mapped[int] = mapped_column(ForeignKey("model_version.id"))
+    
+    # Model configuration
+    state_space_config: Mapped[str | None] = mapped_column(String(2000))  # JSON config
+    hyperparameters: Mapped[str | None] = mapped_column(String(2000))  # JSON hyperparameters
+    feature_config: Mapped[str | None] = mapped_column(String(2000))  # JSON feature configuration
+    
+    # Training configuration
+    training_algorithm: Mapped[str100 | None]  # "kalman", "particle_filter", "gradient_descent"
+    optimizer_config: Mapped[str | None] = mapped_column(String(1000))  # JSON optimizer settings
+    regularization_config: Mapped[str | None] = mapped_column(String(1000))  # JSON regularization
+    
+    # Data configuration
+    training_data_sources: Mapped[str | None] = mapped_column(String(1000))  # JSON data sources
+    feature_selection_method: Mapped[str100 | None]
+    data_preprocessing_steps: Mapped[str | None] = mapped_column(String(1000))  # JSON preprocessing
+    
+    # Performance metrics
+    convergence_metrics: Mapped[str | None] = mapped_column(String(1000))  # JSON convergence data
+    computational_metrics: Mapped[str | None] = mapped_column(String(1000))  # JSON compute stats
+    memory_usage_metrics: Mapped[str | None] = mapped_column(String(1000))  # JSON memory stats
+    
+    # Experiment tracking
+    experiment_id: Mapped[str100 | None]  # MLflow/Weights&Biases experiment ID
+    run_id: Mapped[str100 | None]  # Specific run ID within experiment
+    parent_run_id: Mapped[str100 | None]  # Parent run for nested experiments
+    
+    # Model lineage
+    derived_from_version_id: Mapped[int | None] = mapped_column(ForeignKey("model_version.id"))
+    inheritance_type: Mapped[str100 | None]  # "fine_tuned", "transferred", "ensemble_member"
+    modification_summary: Mapped[str | None] = mapped_column(String(1000))
+    
+    # Quality metrics
+    data_quality_score: Mapped[float | None]  # 0-1 score for training data quality
+    model_complexity_score: Mapped[float | None]  # Complexity measure
+    interpretability_score: Mapped[float | None]  # How interpretable the model is
+    
+    # Deployment metadata
+    deployment_requirements: Mapped[str | None] = mapped_column(String(1000))  # JSON requirements
+    compatibility_info: Mapped[str | None] = mapped_column(String(1000))  # JSON compatibility
+    
+    # Timestamps
+    created_at: Mapped[str100]
+    updated_at: Mapped[str100]
+    
+    # Relationships
+    model_version: Mapped["ModelVersion"] = relationship()
+    derived_from: Mapped["ModelVersion"] = relationship(foreign_keys=[derived_from_version_id])
+
+    def __str__(self):
+        return f"ModelMetadata(Version {self.version_id})"
 
 
 class FeatureDefinition(Base):
